@@ -192,7 +192,8 @@ func SetLogCallback(callback C.LogCallback) {
 	// Also set the Go logger callback
 	utils.SetCallback(func(level utils.LogLevel, message string) {
 		cMessage := C.CString(message)
-		defer C.free(unsafe.Pointer(cMessage))
+		// Do not free cMessage here; it must be freed by the Dart side to avoid Use-After-Free
+		// in async callbacks.
 		C.callLogCallback(C.int(level), cMessage)
 	})
 

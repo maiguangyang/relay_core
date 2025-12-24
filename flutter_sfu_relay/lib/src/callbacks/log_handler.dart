@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -63,15 +64,22 @@ class LogHandler {
 
   /// 原生回调处理函数
   static void _onLog(int level, Pointer<Char> messagePtr) {
-    final message = messagePtr == nullptr
-        ? ''
-        : messagePtr.cast<Utf8>().toDartString();
+    if (messagePtr == nullptr) return;
+
+    String message;
+    try {
+      message = messagePtr.cast<Utf8>().toDartString();
+    } catch (_) {
+      // Fallback for non-utf8
+      message = '<invalid utf8>';
+    }
+
+    // Must free the memory allocated by Go
+    bindings.FreeString(messagePtr);
 
     final entry = LogEntry(level: LogLevel.fromInt(level), message: message);
-
     _controller.add(entry);
 
-    // 同时打印到 Flutter 控制台
     // ignore: avoid_print
     print('[SfuRelay] ${entry.toString()}');
   }
