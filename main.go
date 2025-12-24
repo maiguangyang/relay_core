@@ -6,6 +6,9 @@
  * Relay Core - Embedded Micro SFU for RTP Forwarding
  * This is the main entry point for C-shared library exports.
  * All functions with //export comments are exposed to Dart FFI.
+ *
+ * Note: This is a streamlined version focused on Relay P2P forwarding.
+ * Main functionality is in relay_room_ffi.go for P2P connection management.
  */
 package main
 
@@ -50,10 +53,7 @@ import (
 	"unsafe"
 
 	"github.com/maiguangyang/relay_core/pkg/election"
-	"github.com/maiguangyang/relay_core/pkg/sfu"
-	"github.com/maiguangyang/relay_core/pkg/signaling"
 	"github.com/maiguangyang/relay_core/pkg/utils"
-	"github.com/pion/webrtc/v4"
 )
 
 // Event types for callbacks
@@ -69,303 +69,6 @@ const (
 )
 
 // ==========================================
-// Relay Instance Management
-// ==========================================
-
-//export RelayCreate
-func RelayCreate() C.int64_t {
-	config := sfu.DefaultConfig()
-	sfuInstance := sfu.New(config)
-
-	// Set up callbacks
-	sfuInstance.SetOnPeerJoined(func(roomID, peerID string) {
-		emitEvent(EventTypePeerJoined, roomID, peerID, "")
-	})
-
-	sfuInstance.SetOnPeerLeft(func(roomID, peerID string) {
-		emitEvent(EventTypePeerLeft, roomID, peerID, "")
-	})
-
-	sfuInstance.SetOnTrackAdded(func(roomID, peerID, trackID string, kind string) {
-		data, _ := json.Marshal(signaling.TrackInfo{
-			TrackID: trackID,
-			Kind:    kind,
-		})
-		emitEvent(EventTypeTrackAdded, roomID, peerID, string(data))
-	})
-
-	sfuInstance.SetOnError(func(roomID, peerID string, err error) {
-		data, _ := json.Marshal(signaling.ErrorMessage{
-			Code:    500,
-			Message: err.Error(),
-		})
-		emitEvent(EventTypeError, roomID, peerID, string(data))
-	})
-
-	sfuInstance.SetOnICECandidate(func(roomID, peerID string, candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			candidateJSON := candidate.ToJSON()
-			data, _ := json.Marshal(signaling.CandidateMessage{
-				Candidate:        candidateJSON.Candidate,
-				SDPMid:           candidateJSON.SDPMid,
-				SDPMLineIndex:    candidateJSON.SDPMLineIndex,
-				UsernameFragment: candidateJSON.UsernameFragment,
-			})
-			emitEvent(EventTypeICECandidate, roomID, peerID, string(data))
-		}
-	})
-
-	id := registerSFUInstance(sfuInstance)
-	utils.Info("Relay created with ID: %d", id)
-	return C.int64_t(id)
-}
-
-//export RelayCreateWithConfig
-func RelayCreateWithConfig(iceServersJSON *C.char, debug C.int) C.int64_t {
-	config := sfu.DefaultConfig()
-	config.Debug = debug != 0
-
-	if iceServersJSON != nil {
-		var servers []webrtc.ICEServer
-		if err := json.Unmarshal([]byte(C.GoString(iceServersJSON)), &servers); err == nil {
-			config.ICEServers = servers
-		}
-	}
-
-	sfuInstance := sfu.New(config)
-	id := registerSFUInstance(sfuInstance)
-	return C.int64_t(id)
-}
-
-//export RelayDestroy
-func RelayDestroy(relayID C.int64_t) C.int {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.int(-1)
-	}
-
-	if err := sfuInstance.Close(); err != nil {
-		utils.Error("Failed to close relay %d: %v", relayID, err)
-		return C.int(-1)
-	}
-
-	unregisterSFUInstance(int64(relayID))
-	utils.Info("Relay destroyed: %d", relayID)
-	return C.int(0)
-}
-
-// ==========================================
-// Room Management
-// ==========================================
-
-//export RoomCreate
-func RoomCreate(relayID C.int64_t, roomID *C.char) C.int {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.int(-1)
-	}
-
-	goRoomID := C.GoString(roomID)
-	_, err := sfuInstance.CreateRoom(goRoomID)
-	if err != nil {
-		utils.Error("Failed to create room %s: %v", goRoomID, err)
-		return C.int(-1)
-	}
-
-	utils.Info("Room created: %s", goRoomID)
-	return C.int(0)
-}
-
-//export RoomDestroy
-func RoomDestroy(relayID C.int64_t, roomID *C.char) C.int {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.int(-1)
-	}
-
-	goRoomID := C.GoString(roomID)
-	if err := sfuInstance.DestroyRoom(goRoomID); err != nil {
-		utils.Error("Failed to destroy room %s: %v", goRoomID, err)
-		return C.int(-1)
-	}
-
-	utils.Info("Room destroyed: %s", goRoomID)
-	return C.int(0)
-}
-
-//export RoomList
-func RoomList(relayID C.int64_t) *C.char {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.CString("[]")
-	}
-
-	rooms := sfuInstance.ListRooms()
-	data, _ := json.Marshal(rooms)
-	return C.CString(string(data))
-}
-
-//export RoomInfo
-func RoomInfo(relayID C.int64_t, roomID *C.char) *C.char {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return nil
-	}
-
-	goRoomID := C.GoString(roomID)
-	room := sfuInstance.GetRoom(goRoomID)
-	if room == nil {
-		return nil
-	}
-
-	info := signaling.RoomInfo{
-		RoomID:    goRoomID,
-		PeerCount: room.PeerCount(),
-		Peers:     make([]signaling.PeerInfo, 0),
-	}
-
-	for _, peerID := range room.ListPeers() {
-		info.Peers = append(info.Peers, signaling.PeerInfo{
-			PeerID: peerID,
-		})
-	}
-
-	// Get proxy if election is enabled
-	elector := getElector(goRoomID)
-	if elector != nil {
-		info.ProxyID = elector.GetCurrentProxy()
-	}
-
-	data, _ := json.Marshal(info)
-	return C.CString(string(data))
-}
-
-// ==========================================
-// Peer Management
-// ==========================================
-
-//export PeerAdd
-func PeerAdd(relayID C.int64_t, roomID *C.char, peerID *C.char, offerSDP *C.char) *C.char {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return nil
-	}
-
-	goRoomID := C.GoString(roomID)
-	goPeerID := C.GoString(peerID)
-	goOfferSDP := C.GoString(offerSDP)
-
-	room := sfuInstance.GetRoom(goRoomID)
-	if room == nil {
-		// Auto-create room if not exists
-		var err error
-		room, err = sfuInstance.CreateRoom(goRoomID)
-		if err != nil {
-			utils.Error("Failed to create room %s: %v", goRoomID, err)
-			return nil
-		}
-	}
-
-	_, answerSDP, err := room.AddPeer(goPeerID, goOfferSDP)
-	if err != nil {
-		utils.Error("Failed to add peer %s to room %s: %v", goPeerID, goRoomID, err)
-		return nil
-	}
-
-	utils.Info("Peer added: %s to room %s", goPeerID, goRoomID)
-	return C.CString(answerSDP)
-}
-
-//export PeerRemove
-func PeerRemove(relayID C.int64_t, roomID *C.char, peerID *C.char) C.int {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.int(-1)
-	}
-
-	goRoomID := C.GoString(roomID)
-	goPeerID := C.GoString(peerID)
-
-	room := sfuInstance.GetRoom(goRoomID)
-	if room == nil {
-		return C.int(-1)
-	}
-
-	if err := room.RemovePeer(goPeerID); err != nil {
-		utils.Error("Failed to remove peer %s from room %s: %v", goPeerID, goRoomID, err)
-		return C.int(-1)
-	}
-
-	// Also remove from election
-	elector := getElector(goRoomID)
-	if elector != nil {
-		elector.RemoveCandidate(goPeerID)
-	}
-
-	utils.Info("Peer removed: %s from room %s", goPeerID, goRoomID)
-	return C.int(0)
-}
-
-//export PeerList
-func PeerList(relayID C.int64_t, roomID *C.char) *C.char {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.CString("[]")
-	}
-
-	goRoomID := C.GoString(roomID)
-	room := sfuInstance.GetRoom(goRoomID)
-	if room == nil {
-		return C.CString("[]")
-	}
-
-	peers := room.ListPeers()
-	data, _ := json.Marshal(peers)
-	return C.CString(string(data))
-}
-
-// ==========================================
-// Signaling Handlers
-// ==========================================
-
-//export HandleICECandidate
-func HandleICECandidate(relayID C.int64_t, roomID *C.char, peerID *C.char, candidateJSON *C.char) C.int {
-	sfuInstance := getSFUInstance(int64(relayID))
-	if sfuInstance == nil {
-		return C.int(-1)
-	}
-
-	goRoomID := C.GoString(roomID)
-	goPeerID := C.GoString(peerID)
-	goCandidateJSON := C.GoString(candidateJSON)
-
-	room := sfuInstance.GetRoom(goRoomID)
-	if room == nil {
-		return C.int(-1)
-	}
-
-	var candidateMsg signaling.CandidateMessage
-	if err := json.Unmarshal([]byte(goCandidateJSON), &candidateMsg); err != nil {
-		utils.Error("Failed to parse ICE candidate: %v", err)
-		return C.int(-1)
-	}
-
-	candidateInit := webrtc.ICECandidateInit{
-		Candidate:        candidateMsg.Candidate,
-		SDPMid:           candidateMsg.SDPMid,
-		SDPMLineIndex:    candidateMsg.SDPMLineIndex,
-		UsernameFragment: candidateMsg.UsernameFragment,
-	}
-
-	if err := room.AddICECandidate(goPeerID, candidateInit); err != nil {
-		utils.Error("Failed to add ICE candidate for peer %s: %v", goPeerID, err)
-		return C.int(-1)
-	}
-
-	return C.int(0)
-}
-
-// ==========================================
 // Election Management
 // ==========================================
 
@@ -378,10 +81,12 @@ func ElectionEnable(relayID C.int64_t, roomID *C.char) C.int {
 
 	elector.SetOnElection(func(result election.ElectionResult) {
 		data, _ := json.Marshal(map[string]interface{}{
-			"proxy_id":  result.ProxyID,
-			"score":     result.Score,
-			"reason":    result.Reason,
-			"timestamp": result.Timestamp.Unix(),
+			"proxy_id":        result.ProxyID,
+			"score":           result.Score,
+			"device_type":     result.DeviceType,
+			"connection_type": result.ConnectionType,
+			"reason":          result.Reason,
+			"timestamp":       result.Timestamp.Unix(),
 		})
 		emitEvent(EventTypeProxyChange, goRoomID, result.ProxyID, string(data))
 	})
@@ -442,10 +147,12 @@ func ElectionTrigger(relayID C.int64_t, roomID *C.char) *C.char {
 	}
 
 	data, _ := json.Marshal(map[string]interface{}{
-		"proxy_id":  result.ProxyID,
-		"score":     result.Score,
-		"reason":    result.Reason,
-		"timestamp": result.Timestamp.Unix(),
+		"proxy_id":        result.ProxyID,
+		"score":           result.Score,
+		"device_type":     result.DeviceType,
+		"connection_type": result.ConnectionType,
+		"reason":          result.Reason,
+		"timestamp":       result.Timestamp.Unix(),
 	})
 
 	return C.CString(string(data))
@@ -508,7 +215,7 @@ func FreeString(s *C.char) {
 
 //export GetVersion
 func GetVersion() *C.char {
-	return C.CString("1.0.0")
+	return C.CString("1.0.0-relay")
 }
 
 // emitEvent sends an event through the callback
