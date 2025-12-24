@@ -41,7 +41,7 @@ func unregisterElector(roomID string) {
 	electors.Delete(roomID)
 }
 
-// cleanupAllElectors closes all electors
+// cleanupAllElectors closes all electors - called on application shutdown
 func cleanupAllElectors() {
 	electors.Range(func(key, value interface{}) bool {
 		if e, ok := value.(*election.Elector); ok {

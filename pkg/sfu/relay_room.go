@@ -60,11 +60,6 @@ type Subscriber struct {
 	packetsSent  uint64
 	lastActivity time.Time
 
-	// 回调
-	onStateChange     func(id string, state SubscriberState)
-	onICECandidate    func(id string, candidate *webrtc.ICECandidate)
-	onNeedRenegotiate func(id string) // 需要重协商时触发
-
 	closed bool
 }
 

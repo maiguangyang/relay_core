@@ -101,8 +101,10 @@ type JitterBuffer struct {
 	packetsReorder  uint64
 
 	// 延迟估计
-	currentDelay time.Duration
-	jitter       time.Duration
+	currentDelay    time.Duration
+	jitter          time.Duration // 当前抖动估计值
+	lastArrivalTime time.Time     // 上一个包到达时间
+	lastTimestamp   uint32        // 上一个包的 RTP 时间戳
 
 	// 输出通道
 	outputCh chan *rtp.Packet
@@ -144,7 +146,39 @@ func (jb *JitterBuffer) Push(packet *rtp.Packet) {
 		return
 	}
 
+	now := time.Now()
 	jb.packetsReceived++
+
+	// 计算抖动 (RFC 3550 算法)
+	if jb.initialized && !jb.lastArrivalTime.IsZero() {
+		// 计算到达时间差
+		arrivalDiff := now.Sub(jb.lastArrivalTime)
+		// 计算 RTP 时间戳差（假设 90kHz 时钟）
+		timestampDiff := time.Duration(packet.Timestamp-jb.lastTimestamp) * time.Second / 90000
+
+		// 计算偏差
+		d := arrivalDiff - timestampDiff
+		if d < 0 {
+			d = -d
+		}
+
+		// 运行平均计算: jitter = jitter + (|D(i-1,i)| - jitter) / 16
+		jb.jitter = jb.jitter + (d-jb.jitter)/16
+
+		// 自适应调整延迟：保持在 jitter * 2 和 jitter * 4 之间
+		targetDelay := jb.jitter * 3
+		if targetDelay < jb.config.MinDelay {
+			targetDelay = jb.config.MinDelay
+		}
+		if targetDelay > jb.config.MaxDelay {
+			targetDelay = jb.config.MaxDelay
+		}
+		// 平滑调整
+		jb.currentDelay = jb.currentDelay + (targetDelay-jb.currentDelay)/8
+	}
+
+	jb.lastArrivalTime = now
+	jb.lastTimestamp = packet.Timestamp
 
 	// 检查是否是旧包（已经播放过的）
 	if jb.initialized {
@@ -169,7 +203,7 @@ func (jb *JitterBuffer) Push(packet *rtp.Packet) {
 	// 添加到缓冲区
 	buffered := &BufferedPacket{
 		Packet:       packet,
-		ReceivedTime: time.Now(),
+		ReceivedTime: now,
 	}
 	heap.Push(&jb.packets, buffered)
 }
@@ -296,6 +330,7 @@ type JitterBufferStats struct {
 	Enabled         bool   `json:"enabled"`
 	BufferedPackets int    `json:"buffered_packets"`
 	CurrentDelay    int64  `json:"current_delay_ms"`
+	Jitter          int64  `json:"jitter_ms"`
 	PacketsReceived uint64 `json:"packets_received"`
 	PacketsDropped  uint64 `json:"packets_dropped"`
 	PacketsReorder  uint64 `json:"packets_reorder"`
@@ -310,6 +345,7 @@ func (jb *JitterBuffer) GetStats() JitterBufferStats {
 		Enabled:         jb.config.Enabled,
 		BufferedPackets: len(jb.packets),
 		CurrentDelay:    jb.currentDelay.Milliseconds(),
+		Jitter:          jb.jitter.Milliseconds(),
 		PacketsReceived: jb.packetsReceived,
 		PacketsDropped:  jb.packetsDropped,
 		PacketsReorder:  jb.packetsReorder,

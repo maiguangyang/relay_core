@@ -213,6 +213,12 @@ func FreeString(s *C.char) {
 	C.free(unsafe.Pointer(s))
 }
 
+//export CleanupAll
+func CleanupAll() {
+	cleanupAllElectors()
+	utils.Info("All resources cleaned up")
+}
+
 //export GetVersion
 func GetVersion() *C.char {
 	return C.CString("1.0.0-relay")
