@@ -2,18 +2,86 @@
 
 ## 概览
 
-Relay Core 提供 **85 个** C 导出函数，分为以下几类：
+Relay Core 提供 **106 个** C 导出函数，分为以下几类：
 
 | 分类 | 数量 | 主要功能 |
-|------|------|---------|
+|------|------|---------| 
+| [Coordinator](#coordinator---一键自动代理) | 14 | 一键启用自动代理和故障切换 |
 | [RelayRoom](#relayroom---p2p-连接管理) | 17 | P2P 连接管理 |
 | [SourceSwitcher](#sourceswitcher---源切换) | 8 | 双源切换 |
 | [Election](#election---代理选举) | 8 | 动态选举 |
+| [Failover](#failover---故障切换) | 6 | 自动故障切换 |
 | [Keepalive](#keepalive---心跳保活) | 12 | 心跳检测 |
 | [Stats](#stats---流量统计) | 13 | 流量监控 |
 | [Codec](#codec---编解码器) | 5 | 编码协商 |
 | [JitterBuffer](#jitterbuffer---抖动缓冲) | 7 | 可选抖动缓冲 |
-| [回调 & 工具](#回调--工具) | 7 | 事件/日志回调 |
+| [回调 & 工具](#回调--工具) | 8 | 事件/日志回调 |
+
+---
+
+## Coordinator - 一键自动代理
+
+**推荐使用**：Coordinator 集成了所有组件（Keepalive、Election、Failover、SourceSwitcher），提供一键启用的自动代理模式。
+
+### 核心功能
+
+```c
+// 一键启用自动代理模式（推荐）
+// 自动管理：心跳检测、选举、故障切换、Relay 接管
+int CoordinatorEnable(char* roomID, char* localPeerID);
+
+// 禁用自动代理模式
+int CoordinatorDisable(char* roomID);
+
+// 获取状态
+char* CoordinatorGetStatus(char* roomID);
+
+// 本机是否是 Relay
+int CoordinatorIsRelay(char* roomID);  // 1=是, 0=否, -1=错误
+```
+
+### Peer 管理
+
+```c
+// 添加 Peer（自动监控心跳 + 加入选举候选）
+int CoordinatorAddPeer(char* roomID, char* peerID, 
+                       int deviceType, int connectionType, int powerState);
+
+// 移除 Peer
+int CoordinatorRemovePeer(char* roomID, char* peerID);
+
+// 处理 Pong（心跳响应）
+int CoordinatorHandlePong(char* roomID, char* peerID);
+
+// 更新本机设备信息
+int CoordinatorUpdateLocalDevice(char* roomID, 
+                                 int deviceType, int connectionType, int powerState);
+```
+
+### Relay 协调
+
+```c
+// 设置当前 Relay（收到信令通知时）
+int CoordinatorSetRelay(char* roomID, char* relayID, uint64_t epoch);
+
+// 接收其他节点的 Relay 声明（冲突解决）
+// score: 声明者分数，用于同 epoch 冲突解决
+int CoordinatorReceiveClaim(char* roomID, char* peerID, uint64_t epoch, double score);
+```
+
+### RTP 注入
+
+```c
+// 注入 SFU RTP 包
+int CoordinatorInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
+
+// 注入本地分享 RTP 包
+int CoordinatorInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
+
+// 开始/停止本地分享
+int CoordinatorStartLocalShare(char* roomID, char* sharerID);
+int CoordinatorStopLocalShare(char* roomID);
+```
 
 ---
 
@@ -23,7 +91,6 @@ Relay Core 提供 **85 个** C 导出函数，分为以下几类：
 
 ```c
 // 创建 Relay 房间
-// iceServersJSON: ICE 服务器配置，如 [{"urls": ["stun:stun.l.google.com:19302"]}]
 int RelayRoomCreate(char* roomID, char* iceServersJSON);
 
 // 销毁房间
@@ -81,10 +148,8 @@ int RelayRoomInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
 // 注入本地分享 RTP 包
 int RelayRoomInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
 
-// 开始本地分享
+// 开始/停止本地分享
 int RelayRoomStartLocalShare(char* roomID, char* sharerID);
-
-// 停止本地分享
 int RelayRoomStopLocalShare(char* roomID);
 
 // 获取房间状态 (JSON)
@@ -96,28 +161,20 @@ char* RelayRoomGetStatus(char* roomID);
 ## SourceSwitcher - 源切换
 
 ```c
-// 创建源切换器
+// 创建/销毁源切换器
 int SourceSwitcherCreate(char* roomID);
-
-// 销毁源切换器
 int SourceSwitcherDestroy(char* roomID);
 
-// 注入 SFU RTP 包
+// 注入 RTP 包
 int SourceSwitcherInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
-
-// 注入本地分享 RTP 包
 int SourceSwitcherInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
 
-// 开始本地分享（切到 Local 源）
+// 本地分享控制
 int SourceSwitcherStartLocalShare(char* roomID, char* sharerID);
-
-// 停止本地分享（切回 SFU 源）
 int SourceSwitcherStopLocalShare(char* roomID);
 
-// 获取状态 (JSON)
+// 状态查询
 char* SourceSwitcherGetStatus(char* roomID);
-
-// 是否正在本地分享
 int SourceSwitcherIsLocalSharing(char* roomID);  // 1=是, 0=否
 ```
 
@@ -126,10 +183,8 @@ int SourceSwitcherIsLocalSharing(char* roomID);  // 1=是, 0=否
 ## Election - 代理选举
 
 ```c
-// 启用选举
+// 启用/禁用选举
 int ElectionEnable(int64_t relayID, char* roomID);
-
-// 禁用选举
 int ElectionDisable(int64_t relayID, char* roomID);
 
 // 更新设备信息
@@ -143,55 +198,72 @@ int ElectionUpdateDeviceInfo(int64_t relayID, char* roomID, char* peerID,
 int ElectionUpdateNetworkMetrics(int64_t relayID, char* roomID, char* peerID,
                                  int64_t bandwidth, int64_t latency, double packetLoss);
 
-// 更新候选（旧版，兼容）
-int ElectionUpdateCandidate(int64_t relayID, char* roomID, char* peerID,
-                            int64_t bandwidth, int64_t latency, double packetLoss);
-
-// 手动触发选举（返回结果 JSON）
+// 手动触发选举
 char* ElectionTrigger(int64_t relayID, char* roomID);
 
-// 获取当前代理 ID
+// 获取当前代理/候选者列表
 char* ElectionGetProxy(int64_t relayID, char* roomID);
-
-// 获取候选者列表 (JSON)
 char* ElectionGetCandidates(int64_t relayID, char* roomID);
 ```
+
+---
+
+## Failover - 故障切换
+
+自动 Relay 故障检测和切换，包含冲突解决机制。
+
+```c
+// 启用/禁用故障切换
+int FailoverEnable(char* roomID, char* localPeerID);
+int FailoverDisable(char* roomID);
+
+// 设置当前 Relay
+int FailoverSetCurrentRelay(char* roomID, char* relayID, uint64_t epoch);
+
+// 更新本机分数（用于选举排序）
+int FailoverUpdateLocalScore(char* roomID, double score);
+
+// 接收 Relay 声明（冲突解决）
+// 收到同 epoch 声明时，分数高者优先
+int FailoverReceiveClaim(char* roomID, char* peerID, uint64_t epoch, double score);
+
+// 获取状态
+char* FailoverGetState(char* roomID);
+```
+
+### 冲突解决策略
+
+当多个节点同时声明成为 Relay 时：
+
+1. **epoch 更高者优先**
+2. **同 epoch，分数更高者优先**
+3. **分数相同，PeerID 字典序更大者优先**
 
 ---
 
 ## Keepalive - 心跳保活
 
 ```c
-// 创建心跳管理器
+// 创建/销毁心跳管理器
 int KeepaliveCreate(char* roomID, int intervalMs, int timeoutMs);
-
-// 销毁心跳管理器
 int KeepaliveDestroy(char* roomID);
 
-// 启动/停止心跳检测
+// 启动/停止
 int KeepaliveStart(char* roomID);
 int KeepaliveStop(char* roomID);
 
-// 添加/移除监控的 Peer
+// Peer 管理
 int KeepaliveAddPeer(char* roomID, char* peerID);
 int KeepaliveRemovePeer(char* roomID, char* peerID);
-
-// 处理 Pong 响应
 int KeepaliveHandlePong(char* roomID, char* peerID);
 
-// 获取 Peer 状态 (0=Unknown, 1=Online, 2=Slow, 3=Offline)
-int KeepaliveGetPeerStatus(char* roomID, char* peerID);
-
-// 获取 RTT (毫秒)
+// 状态查询
+int KeepaliveGetPeerStatus(char* roomID, char* peerID);  // 0=Unknown, 1=Online, 2=Slow, 3=Offline
 int64_t KeepaliveGetPeerRTT(char* roomID, char* peerID);
-
-// 获取 Peer 详情 (JSON)
 char* KeepaliveGetPeerInfo(char* roomID, char* peerID);
-
-// 获取所有 Peer 信息 (JSON 数组)
 char* KeepaliveGetAllPeerInfo(char* roomID);
 
-// 设置 Ping 回调
+// Ping 回调
 void SetPingCallback(PingCallback callback);
 ```
 
@@ -200,26 +272,22 @@ void SetPingCallback(PingCallback callback);
 ## Stats - 流量统计
 
 ```c
-// 创建/销毁统计
+// 创建/销毁
 int StatsCreate(char* roomID);
 int StatsDestroy(char* roomID);
 
-// 添加接收/发送字节数
+// 添加统计数据
 int StatsAddBytesIn(char* roomID, char* peerID, uint64_t bytes);
 int StatsAddBytesOut(char* roomID, char* peerID, uint64_t bytes);
-
-// 添加丢包
 int StatsAddPacketLost(char* roomID);
-
-// 计算码率（每秒调用一次）
 int StatsCalculateBitrate(char* roomID);
 
 // 获取统计
-char* StatsGetSnapshot(char* roomID);  // 完整快照
-char* StatsGetTraffic(char* roomID);   // 总体流量
-double StatsGetBitrateIn(char* roomID);  // 入站码率 bps
-double StatsGetBitrateOut(char* roomID); // 出站码率 bps
-double StatsGetLossRate(char* roomID);   // 丢包率
+char* StatsGetSnapshot(char* roomID);
+char* StatsGetTraffic(char* roomID);
+double StatsGetBitrateIn(char* roomID);
+double StatsGetBitrateOut(char* roomID);
+double StatsGetLossRate(char* roomID);
 
 // 缓冲池统计
 char* BufferPoolGetStats(void);
@@ -237,15 +305,10 @@ char* NetworkProbeGetAllMetrics(char* roomID);
 ## Codec - 编解码器
 
 ```c
-// 获取支持的编解码器
 char* CodecGetSupportedVideo(void);  // VP8, VP9, H264, AV1
 char* CodecGetSupportedAudio(void);  // Opus, G722
-
-// 解析 MimeType
 char* CodecParseType(char* mimeType);
-
-// 类型判断
-int CodecIsVideo(char* codecType);  // 1=是, 0=否
+int CodecIsVideo(char* codecType);
 int CodecIsAudio(char* codecType);
 ```
 
@@ -254,25 +317,12 @@ int CodecIsAudio(char* codecType);
 ## JitterBuffer - 抖动缓冲
 
 ```c
-// 创建抖动缓冲（默认禁用）
 int JitterBufferCreate(char* key, int enabled, int targetDelayMs);
-
-// 销毁
 int JitterBufferDestroy(char* key);
-
-// 启用/禁用
 int JitterBufferEnable(char* key, int enabled);
-
-// 设置目标延迟
 int JitterBufferSetDelay(char* key, int delayMs);
-
-// 清空缓冲区
 int JitterBufferFlush(char* key);
-
-// 获取统计
-char* JitterBufferGetStats(char* key);
-
-// 是否启用
+char* JitterBufferGetStats(char* key);  // 包含 jitter_ms 字段
 int JitterBufferIsEnabled(char* key);
 ```
 
@@ -283,26 +333,28 @@ int JitterBufferIsEnabled(char* key);
 ### 事件回调
 
 ```c
-// 设置事件回调
 typedef void (*EventCallback)(int eventType, const char* roomId, 
                               const char* peerId, const char* data);
 void SetEventCallback(EventCallback callback);
 ```
 
-事件类型：
-- `1` = Peer 加入
-- `2` = Peer 离开
-- `3` = Track 添加
-- `4` = 错误
-- `5` = ICE 候选
-- `6` = 代理变更
-- `10` = 订阅者加入
-- `11` = 订阅者离开
-- `12` = 需要重协商
-- `20` = Peer 上线
-- `21` = Peer 响应缓慢
-- `22` = Peer 离线
-- `23` = 需要发送 Ping
+**事件类型**：
+
+| 值 | 事件 | 说明 |
+|----|------|------|
+| 1 | Peer 加入 | |
+| 2 | Peer 离开 | |
+| 3 | Track 添加 | |
+| 4 | 错误 | |
+| 5 | ICE 候选 | |
+| 6 | 代理变更 | Relay 切换、本机成为 Relay |
+| 10 | 订阅者加入 | |
+| 11 | 订阅者离开 | |
+| 12 | 需要重协商 | |
+| 20 | Peer 上线 | 心跳恢复 |
+| 21 | Peer 响应缓慢 | RTT 超过阈值 |
+| 22 | Peer 离线 | 心跳超时 |
+| 23 | 需要发送 Ping | |
 
 ### 日志回调
 
@@ -315,22 +367,15 @@ void SetLogLevel(int level);  // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
 ### 工具函数
 
 ```c
-// 释放 Go 分配的字符串
-void FreeString(char* s);
-
-// 获取版本号
-char* GetVersion(void);
+void FreeString(char* s);       // 释放 Go 分配的字符串
+void CleanupAll(void);          // 释放所有资源
+char* GetVersion(void);         // 获取版本号
 ```
 
 ### 便捷组合函数
 
 ```c
-// 初始化代理模式（创建 SourceSwitcher + 启用选举）
 int ProxyModeInit(int64_t relayID, char* roomID);
-
-// 清理代理模式
 int ProxyModeCleanup(int64_t relayID, char* roomID);
-
-// 获取代理模式综合状态
 char* ProxyModeGetStatus(int64_t relayID, char* roomID);
 ```
