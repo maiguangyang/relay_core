@@ -15,16 +15,31 @@ Pod::Spec.new do |s|
 
   s.source           = { :path => '.' }
   
-  # 使用预编译的 Go XCFramework
+  # 使用预编译的 Go XCFramework (包含静态库 .a)
   s.vendored_frameworks = 'librelay.xcframework'
+  
+  # 静态库需要的系统框架和库
+  s.frameworks = 'Foundation', 'Security', 'SystemConfiguration', 'CoreFoundation'
+  s.libraries = 'resolv'
+  
+  # 占位文件 (CocoaPods 需要至少一个源文件)
+  s.source_files = 'Classes/**/*'
   
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
+  
+  # 静态库链接需要 use_frameworks! 或者下面的配置
+  s.static_framework = true
 
-  # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 
     'DEFINES_MODULE' => 'YES', 
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/Frameworks @loader_path/Frameworks'
+    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/Frameworks @loader_path/Frameworks',
+    # 确保链接器能找到静态库
+    'OTHER_LDFLAGS' => '$(inherited) -ObjC',
+  }
+  
+  s.user_target_xcconfig = {
+    'OTHER_LDFLAGS' => '$(inherited) -ObjC',
   }
 end
