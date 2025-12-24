@@ -20,7 +20,8 @@
 
 ```
 relay_core/
-├── main.go              # CGO 导出入口（21个导出函数）
+├── main.go              # CGO 导出入口
+├── proxy_mode.go        # 代理模式 FFI 导出
 ├── instance.go          # 实例管理（sync.Map 线程安全）
 ├── go.mod
 ├── go.sum
@@ -28,17 +29,18 @@ relay_core/
 ├── README.md
 └── pkg/
     ├── sfu/
-    │   ├── sfu.go       # SFU 核心引擎
-    │   ├── room.go      # 房间管理
-    │   ├── peer.go      # Peer 管理
-    │   ├── forwarder.go # RTP 转发器（核心）
-    │   └── errors.go    # 错误定义
+    │   ├── sfu.go           # SFU 核心引擎
+    │   ├── room.go          # 房间管理
+    │   ├── peer.go          # Peer 管理
+    │   ├── forwarder.go     # RTP 转发器
+    │   ├── source_switcher.go # 源切换器（代理模式核心）
+    │   └── errors.go        # 错误定义
     ├── signaling/
-    │   └── types.go     # 信令类型定义
+    │   └── types.go         # 信令类型定义
     ├── election/
-    │   └── election.go  # 代理选举算法
+    │   └── election.go      # 增强代理选举（设备类型权重）
     └── utils/
-        └── logger.go    # 日志工具
+        └── logger.go        # 日志工具
 ```
 
 ## 🏗️ 架构
@@ -151,15 +153,52 @@ build/
 | `PeerList(relayID, roomID)` | 列出房间内 Peer | `char*` JSON 数组 |
 | `HandleICECandidate(relayID, roomID, peerID, candidateJSON)` | 添加 ICE 候选 | `int` 0=成功 |
 
-### 代理选举
+### 代理选举（增强版）
 
 | 函数 | 说明 | 返回值 |
 |------|------|--------|
 | `ElectionEnable(relayID, roomID)` | 启用选举 | `int` 0=成功 |
 | `ElectionDisable(relayID, roomID)` | 禁用选举 | `int` 0=成功 |
-| `ElectionUpdateCandidate(relayID, roomID, peerID, bandwidth, latency, packetLoss)` | 更新候选指标 | `int` 0=成功 |
+| `ElectionUpdateDeviceInfo(relayID, roomID, peerID, deviceType, connType, powerState)` | 更新设备信息 | `int` 0=成功 |
+| `ElectionUpdateNetworkMetrics(relayID, roomID, peerID, bandwidth, latency, packetLoss)` | 更新网络指标 | `int` 0=成功 |
 | `ElectionTrigger(relayID, roomID)` | 手动触发选举 | `char*` 选举结果 JSON |
 | `ElectionGetProxy(relayID, roomID)` | 获取当前代理 | `char*` Peer ID |
+| `ElectionGetCandidates(relayID, roomID)` | 获取候选者列表 | `char*` JSON 数组 |
+
+**设备类型 (deviceType)**:
+- `0` = Unknown
+- `1` = PC/Mac (Tier 1, 100分)
+- `2` = Pad (Tier 3, 60分)
+- `3` = Mobile (Tier 4, 40分)
+- `4` = TV (90分)
+
+**连接类型 (connectionType)**:
+- `0` = Unknown
+- `1` = Ethernet (×1.0)
+- `2` = WiFi (×0.8)
+- `3` = Cellular (×0.3)
+
+**电源状态 (powerState)**:
+- `0` = Unknown
+- `1` = PluggedIn (×1.0)
+- `2` = Battery (×0.7)
+- `3` = LowBattery (×0.3)
+
+### 代理模式 (Proxy Mode) 🆕
+
+| 函数 | 说明 | 返回值 |
+|------|------|--------|
+| `ProxyModeInit(relayID, roomID)` | 初始化代理模式 | `int` 0=成功 |
+| `ProxyModeCleanup(relayID, roomID)` | 清理代理模式 | `int` 0=成功 |
+| `ProxyModeGetStatus(relayID, roomID)` | 获取综合状态 | `char*` JSON |
+| `SourceSwitcherCreate(roomID)` | 创建源切换器 | `int` 0=成功 |
+| `SourceSwitcherDestroy(roomID)` | 销毁源切换器 | `int` 0=成功 |
+| `SourceSwitcherInjectSFU(roomID, isVideo, data, dataLen)` | 注入 SFU RTP 包 | `int` 0=成功 |
+| `SourceSwitcherInjectLocal(roomID, isVideo, data, dataLen)` | 注入本地 RTP 包 | `int` 0=成功 |
+| `SourceSwitcherStartLocalShare(roomID, sharerID)` | 开始本地分享 | `int` 0=成功 |
+| `SourceSwitcherStopLocalShare(roomID)` | 停止本地分享 | `int` 0=成功 |
+| `SourceSwitcherGetStatus(roomID)` | 获取切换器状态 | `char*` JSON |
+| `SourceSwitcherIsLocalSharing(roomID)` | 是否正在本地分享 | `int` 1=是, 0=否 |
 
 ### 回调注册
 

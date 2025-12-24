@@ -1,0 +1,676 @@
+/*
+ * @Author: Marlon.M
+ * @Email: maiguangyang@163.com
+ * @Date: 2025-12-24
+ *
+ * Relay Room - 局域网代理转发专用房间
+ * 实现 Relay 模式下的 P2P 连接管理
+ * Relay 节点作为"广播站"，将 SourceSwitcher 的 Track 转发给所有订阅者
+ */
+package sfu
+
+import (
+	"encoding/json"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/pion/webrtc/v4"
+)
+
+// SubscriberState 订阅者连接状态
+type SubscriberState int
+
+const (
+	SubscriberStateConnecting SubscriberState = iota
+	SubscriberStateConnected
+	SubscriberStateDisconnected
+	SubscriberStateFailed
+)
+
+func (s SubscriberState) String() string {
+	switch s {
+	case SubscriberStateConnecting:
+		return "connecting"
+	case SubscriberStateConnected:
+		return "connected"
+	case SubscriberStateDisconnected:
+		return "disconnected"
+	case SubscriberStateFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
+// Subscriber 订阅者 - 从 Relay 接收流的 Peer
+type Subscriber struct {
+	mu sync.RWMutex
+
+	id    string
+	pc    *webrtc.PeerConnection
+	state SubscriberState
+
+	// 发送器
+	videoSender *webrtc.RTPSender
+	audioSender *webrtc.RTPSender
+
+	// 统计
+	bytesSent    uint64
+	packetsSent  uint64
+	lastActivity time.Time
+
+	// 回调
+	onStateChange     func(id string, state SubscriberState)
+	onICECandidate    func(id string, candidate *webrtc.ICECandidate)
+	onNeedRenegotiate func(id string) // 需要重协商时触发
+
+	closed bool
+}
+
+// RelayRoom 代理房间 - 管理 Relay 到订阅者的连接
+type RelayRoom struct {
+	mu sync.RWMutex
+
+	id     string
+	api    *webrtc.API
+	config webrtc.Configuration
+
+	// 源切换器
+	switcher *SourceSwitcher
+
+	// 订阅者列表
+	subscribers map[string]*Subscriber
+
+	// 状态
+	isRelay     bool   // 本机是否是 Relay
+	relayPeerID string // Relay 节点的 ID
+
+	// 回调
+	onSubscriberJoined func(roomID, peerID string)
+	onSubscriberLeft   func(roomID, peerID string)
+	onICECandidate     func(roomID, peerID string, candidate *webrtc.ICECandidate)
+	onNeedRenegotiate  func(roomID, peerID string, offer string)
+	onError            func(roomID, peerID string, err error)
+
+	closed bool
+}
+
+// NewRelayRoom 创建代理房间
+func NewRelayRoom(id string, iceServers []webrtc.ICEServer) (*RelayRoom, error) {
+	// 创建媒体引擎
+	m := &webrtc.MediaEngine{}
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		return nil, err
+	}
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+
+	config := webrtc.Configuration{
+		ICEServers: iceServers,
+	}
+
+	// 创建源切换器
+	switcher, err := NewSourceSwitcher(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RelayRoom{
+		id:          id,
+		api:         api,
+		config:      config,
+		switcher:    switcher,
+		subscribers: make(map[string]*Subscriber),
+	}, nil
+}
+
+// SetCallbacks 设置回调
+func (r *RelayRoom) SetCallbacks(
+	onJoined func(roomID, peerID string),
+	onLeft func(roomID, peerID string),
+	onICE func(roomID, peerID string, candidate *webrtc.ICECandidate),
+	onRenegotiate func(roomID, peerID string, offer string),
+	onError func(roomID, peerID string, err error),
+) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onSubscriberJoined = onJoined
+	r.onSubscriberLeft = onLeft
+	r.onICECandidate = onICE
+	r.onNeedRenegotiate = onRenegotiate
+	r.onError = onError
+}
+
+// GetSourceSwitcher 返回源切换器
+func (r *RelayRoom) GetSourceSwitcher() *SourceSwitcher {
+	return r.switcher
+}
+
+// BecomeRelay 成为 Relay 节点
+func (r *RelayRoom) BecomeRelay(peerID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.isRelay = true
+	r.relayPeerID = peerID
+}
+
+// IsRelay 是否是 Relay 节点
+func (r *RelayRoom) IsRelay() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isRelay
+}
+
+// AddSubscriber 添加订阅者 - 使用远端 Offer 创建连接
+// 返回 Answer SDP
+func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return "", ErrRoomClosed
+	}
+
+	// 检查是否已存在
+	if existing, exists := r.subscribers[peerID]; exists {
+		r.mu.Unlock()
+		// 如果已存在且连接正常，返回错误或处理重连
+		if existing.state == SubscriberStateConnected {
+			return "", nil
+		}
+		// 否则先移除旧连接
+		r.RemoveSubscriber(peerID)
+		r.mu.Lock()
+	}
+	r.mu.Unlock()
+
+	// 创建 PeerConnection
+	pc, err := r.api.NewPeerConnection(r.config)
+	if err != nil {
+		return "", err
+	}
+
+	sub := &Subscriber{
+		id:           peerID,
+		pc:           pc,
+		state:        SubscriberStateConnecting,
+		lastActivity: time.Now(),
+	}
+
+	// 添加 SourceSwitcher 的 Track
+	videoTrack := r.switcher.GetVideoTrack()
+	if videoTrack != nil {
+		sender, err := pc.AddTrack(videoTrack)
+		if err != nil {
+			pc.Close()
+			return "", err
+		}
+		sub.videoSender = sender
+
+		// 读取 RTCP 反馈（必须消费，否则会阻塞）
+		go r.readRTCP(peerID, sender)
+	}
+
+	audioTrack := r.switcher.GetAudioTrack()
+	if audioTrack != nil {
+		sender, err := pc.AddTrack(audioTrack)
+		if err != nil {
+			pc.Close()
+			return "", err
+		}
+		sub.audioSender = sender
+		go r.readRTCP(peerID, sender)
+	}
+
+	// 设置事件处理
+	r.setupSubscriberHandlers(sub)
+
+	// 处理 Offer
+	offer := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP:  offerSDP,
+	}
+
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	// 创建 Answer
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	if err := pc.SetLocalDescription(answer); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	// 注册订阅者
+	r.mu.Lock()
+	r.subscribers[peerID] = sub
+	r.mu.Unlock()
+
+	// 触发回调
+	r.emitSubscriberJoined(peerID)
+
+	return answer.SDP, nil
+}
+
+// CreateOfferForSubscriber 为订阅者创建 Offer（用于重协商）
+func (r *RelayRoom) CreateOfferForSubscriber(peerID string) (string, error) {
+	r.mu.RLock()
+	sub, exists := r.subscribers[peerID]
+	r.mu.RUnlock()
+
+	if !exists {
+		return "", ErrPeerNotFound
+	}
+
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
+	if sub.closed {
+		return "", ErrPeerClosed
+	}
+
+	offer, err := sub.pc.CreateOffer(nil)
+	if err != nil {
+		return "", err
+	}
+
+	if err := sub.pc.SetLocalDescription(offer); err != nil {
+		return "", err
+	}
+
+	return offer.SDP, nil
+}
+
+// HandleSubscriberAnswer 处理订阅者的 Answer（用于重协商）
+func (r *RelayRoom) HandleSubscriberAnswer(peerID string, answerSDP string) error {
+	r.mu.RLock()
+	sub, exists := r.subscribers[peerID]
+	r.mu.RUnlock()
+
+	if !exists {
+		return ErrPeerNotFound
+	}
+
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
+	if sub.closed {
+		return ErrPeerClosed
+	}
+
+	answer := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeAnswer,
+		SDP:  answerSDP,
+	}
+
+	return sub.pc.SetRemoteDescription(answer)
+}
+
+// AddICECandidate 添加 ICE 候选
+func (r *RelayRoom) AddICECandidate(peerID string, candidate webrtc.ICECandidateInit) error {
+	r.mu.RLock()
+	sub, exists := r.subscribers[peerID]
+	r.mu.RUnlock()
+
+	if !exists {
+		return ErrPeerNotFound
+	}
+
+	sub.mu.RLock()
+	defer sub.mu.RUnlock()
+
+	if sub.closed {
+		return ErrPeerClosed
+	}
+
+	return sub.pc.AddICECandidate(candidate)
+}
+
+// RemoveSubscriber 移除订阅者
+func (r *RelayRoom) RemoveSubscriber(peerID string) error {
+	r.mu.Lock()
+	sub, exists := r.subscribers[peerID]
+	if !exists {
+		r.mu.Unlock()
+		return nil
+	}
+	delete(r.subscribers, peerID)
+	r.mu.Unlock()
+
+	// 关闭连接
+	sub.mu.Lock()
+	sub.closed = true
+	pc := sub.pc
+	sub.mu.Unlock()
+
+	if pc != nil {
+		pc.Close()
+	}
+
+	// 触发回调
+	r.emitSubscriberLeft(peerID)
+
+	return nil
+}
+
+// TriggerRenegotiation 触发重协商 - 为所有订阅者生成新 Offer
+func (r *RelayRoom) TriggerRenegotiation() map[string]string {
+	r.mu.RLock()
+	subscribers := make([]*Subscriber, 0, len(r.subscribers))
+	for _, sub := range r.subscribers {
+		subscribers = append(subscribers, sub)
+	}
+	r.mu.RUnlock()
+
+	offers := make(map[string]string)
+
+	for _, sub := range subscribers {
+		sub.mu.Lock()
+		if sub.closed || sub.state != SubscriberStateConnected {
+			sub.mu.Unlock()
+			continue
+		}
+
+		offer, err := sub.pc.CreateOffer(nil)
+		if err != nil {
+			sub.mu.Unlock()
+			continue
+		}
+
+		if err := sub.pc.SetLocalDescription(offer); err != nil {
+			sub.mu.Unlock()
+			continue
+		}
+
+		offers[sub.id] = offer.SDP
+
+		// 触发回调通知 Dart 层
+		r.emitNeedRenegotiate(sub.id, offer.SDP)
+		sub.mu.Unlock()
+	}
+
+	return offers
+}
+
+// UpdateTracks 更新 Track（源切换后调用）
+// 这会触发重协商
+func (r *RelayRoom) UpdateTracks(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP) {
+	r.mu.RLock()
+	subscribers := make([]*Subscriber, 0, len(r.subscribers))
+	for _, sub := range r.subscribers {
+		subscribers = append(subscribers, sub)
+	}
+	r.mu.RUnlock()
+
+	for _, sub := range subscribers {
+		sub.mu.Lock()
+		if sub.closed {
+			sub.mu.Unlock()
+			continue
+		}
+
+		// 更新视频 Track
+		if videoTrack != nil && sub.videoSender != nil {
+			sub.videoSender.ReplaceTrack(videoTrack)
+		}
+
+		// 更新音频 Track
+		if audioTrack != nil && sub.audioSender != nil {
+			sub.audioSender.ReplaceTrack(audioTrack)
+		}
+
+		sub.mu.Unlock()
+	}
+}
+
+// GetSubscribers 获取所有订阅者 ID
+func (r *RelayRoom) GetSubscribers() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.subscribers))
+	for id := range r.subscribers {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetSubscriberCount 获取订阅者数量
+func (r *RelayRoom) GetSubscriberCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.subscribers)
+}
+
+// GetSubscriberState 获取订阅者状态
+func (r *RelayRoom) GetSubscriberState(peerID string) (SubscriberState, bool) {
+	r.mu.RLock()
+	sub, exists := r.subscribers[peerID]
+	r.mu.RUnlock()
+
+	if !exists {
+		return SubscriberStateDisconnected, false
+	}
+
+	sub.mu.RLock()
+	defer sub.mu.RUnlock()
+	return sub.state, true
+}
+
+// Close 关闭房间
+func (r *RelayRoom) Close() error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closed = true
+
+	// 复制订阅者列表
+	subscribers := make([]*Subscriber, 0, len(r.subscribers))
+	for _, sub := range r.subscribers {
+		subscribers = append(subscribers, sub)
+	}
+	r.subscribers = make(map[string]*Subscriber)
+	r.mu.Unlock()
+
+	// 关闭所有订阅者
+	for _, sub := range subscribers {
+		sub.mu.Lock()
+		sub.closed = true
+		if sub.pc != nil {
+			sub.pc.Close()
+		}
+		sub.mu.Unlock()
+	}
+
+	// 关闭源切换器
+	if r.switcher != nil {
+		r.switcher.Close()
+	}
+
+	return nil
+}
+
+// setupSubscriberHandlers 设置订阅者的事件处理器
+func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
+	// ICE 候选生成
+	sub.pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate != nil {
+			r.emitICECandidate(sub.id, candidate)
+		}
+	})
+
+	// 连接状态变化
+	sub.pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		sub.mu.Lock()
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			sub.state = SubscriberStateConnected
+			sub.lastActivity = time.Now()
+		case webrtc.PeerConnectionStateDisconnected:
+			sub.state = SubscriberStateDisconnected
+		case webrtc.PeerConnectionStateFailed:
+			sub.state = SubscriberStateFailed
+		case webrtc.PeerConnectionStateClosed:
+			sub.state = SubscriberStateDisconnected
+		}
+		sub.mu.Unlock()
+	})
+
+	// ICE 连接状态变化
+	sub.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		if state == webrtc.ICEConnectionStateFailed {
+			r.emitError(sub.id, ErrICEFailed)
+		}
+	})
+
+	// 协商需求（Track 变化时触发）
+	sub.pc.OnNegotiationNeeded(func() {
+		// 创建新 Offer 并通知 Dart 层
+		sub.mu.Lock()
+		if sub.closed {
+			sub.mu.Unlock()
+			return
+		}
+
+		offer, err := sub.pc.CreateOffer(nil)
+		if err != nil {
+			sub.mu.Unlock()
+			return
+		}
+
+		if err := sub.pc.SetLocalDescription(offer); err != nil {
+			sub.mu.Unlock()
+			return
+		}
+		sub.mu.Unlock()
+
+		r.emitNeedRenegotiate(sub.id, offer.SDP)
+	})
+}
+
+// readRTCP 读取 RTCP 反馈
+func (r *RelayRoom) readRTCP(peerID string, sender *webrtc.RTPSender) {
+	rtcpBuf := make([]byte, 1500)
+	for {
+		if _, _, err := sender.Read(rtcpBuf); err != nil {
+			return
+		}
+		// 可以在这里处理 RTCP 反馈（如 PLI, NACK 等）
+	}
+}
+
+// 回调触发函数
+func (r *RelayRoom) emitSubscriberJoined(peerID string) {
+	r.mu.RLock()
+	fn := r.onSubscriberJoined
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id, peerID)
+	}
+}
+
+func (r *RelayRoom) emitSubscriberLeft(peerID string) {
+	r.mu.RLock()
+	fn := r.onSubscriberLeft
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id, peerID)
+	}
+}
+
+func (r *RelayRoom) emitICECandidate(peerID string, candidate *webrtc.ICECandidate) {
+	r.mu.RLock()
+	fn := r.onICECandidate
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id, peerID, candidate)
+	}
+}
+
+func (r *RelayRoom) emitNeedRenegotiate(peerID string, offer string) {
+	r.mu.RLock()
+	fn := r.onNeedRenegotiate
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id, peerID, offer)
+	}
+}
+
+func (r *RelayRoom) emitError(peerID string, err error) {
+	r.mu.RLock()
+	fn := r.onError
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id, peerID, err)
+	}
+}
+
+// ========================================
+// 状态结构体
+// ========================================
+
+// SubscriberInfo 订阅者信息
+type SubscriberInfo struct {
+	ID           string `json:"id"`
+	State        string `json:"state"`
+	BytesSent    uint64 `json:"bytes_sent"`
+	PacketsSent  uint64 `json:"packets_sent"`
+	LastActivity int64  `json:"last_activity"`
+}
+
+// RelayRoomStatus 房间状态
+type RelayRoomStatus struct {
+	RoomID          string           `json:"room_id"`
+	IsRelay         bool             `json:"is_relay"`
+	RelayPeerID     string           `json:"relay_peer_id,omitempty"`
+	SubscriberCount int              `json:"subscriber_count"`
+	Subscribers     []SubscriberInfo `json:"subscribers"`
+	SourceSwitcher  interface{}      `json:"source_switcher,omitempty"`
+}
+
+// GetStatus 获取房间状态
+func (r *RelayRoom) GetStatus() RelayRoomStatus {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	status := RelayRoomStatus{
+		RoomID:          r.id,
+		IsRelay:         r.isRelay,
+		RelayPeerID:     r.relayPeerID,
+		SubscriberCount: len(r.subscribers),
+		Subscribers:     make([]SubscriberInfo, 0, len(r.subscribers)),
+	}
+
+	for _, sub := range r.subscribers {
+		sub.mu.RLock()
+		status.Subscribers = append(status.Subscribers, SubscriberInfo{
+			ID:           sub.id,
+			State:        sub.state.String(),
+			BytesSent:    atomic.LoadUint64(&sub.bytesSent),
+			PacketsSent:  atomic.LoadUint64(&sub.packetsSent),
+			LastActivity: sub.lastActivity.Unix(),
+		})
+		sub.mu.RUnlock()
+	}
+
+	if r.switcher != nil {
+		status.SourceSwitcher = r.switcher.GetStatus()
+	}
+
+	return status
+}
+
+// ToJSON 序列化为 JSON
+func (s RelayRoomStatus) ToJSON() string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
