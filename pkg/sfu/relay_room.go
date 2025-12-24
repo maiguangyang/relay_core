@@ -91,33 +91,48 @@ type RelayRoom struct {
 	closed bool
 }
 
+// RelayRoomOption 配置选项
+type RelayRoomOption func(*RelayRoom)
+
+// WithWebRTCAPI 设置自定义 WebRTC API (用于测试或自定义配置)
+func WithWebRTCAPI(api *webrtc.API) RelayRoomOption {
+	return func(r *RelayRoom) {
+		r.api = api
+	}
+}
+
 // NewRelayRoom 创建代理房间
-func NewRelayRoom(id string, iceServers []webrtc.ICEServer) (*RelayRoom, error) {
-	// 创建媒体引擎
-	m := &webrtc.MediaEngine{}
-	if err := m.RegisterDefaultCodecs(); err != nil {
-		return nil, err
-	}
-
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
-
-	config := webrtc.Configuration{
-		ICEServers: iceServers,
-	}
-
+func NewRelayRoom(id string, iceServers []webrtc.ICEServer, opts ...RelayRoomOption) (*RelayRoom, error) {
 	// 创建源切换器
 	switcher, err := NewSourceSwitcher(id)
 	if err != nil {
 		return nil, err
 	}
 
-	return &RelayRoom{
+	room := &RelayRoom{
 		id:          id,
-		api:         api,
-		config:      config,
 		switcher:    switcher,
 		subscribers: make(map[string]*Subscriber),
-	}, nil
+		config: webrtc.Configuration{
+			ICEServers: iceServers,
+		},
+	}
+
+	// 应用选项
+	for _, opt := range opts {
+		opt(room)
+	}
+
+	// 如果没有设置 API，使用默认的
+	if room.api == nil {
+		m := &webrtc.MediaEngine{}
+		if err := m.RegisterDefaultCodecs(); err != nil {
+			return nil, err
+		}
+		room.api = webrtc.NewAPI(webrtc.WithMediaEngine(m))
+	}
+
+	return room, nil
 }
 
 // SetCallbacks 设置回调
