@@ -46,19 +46,21 @@ class LogHandler {
   static final StreamController<LogEntry> _controller =
       StreamController<LogEntry>.broadcast();
 
-  static NativeCallable<LogCallbackFunction>? _nativeCallback;
+  // static NativeCallable<LogCallbackFunction>? _nativeCallback;
   static bool _initialized = false;
 
   /// 日志流
   static Stream<LogEntry> get logs => _controller.stream;
 
   /// 初始化日志处理器
+  /// 初始化日志处理器
   static void init() {
     if (_initialized) return;
 
-    _nativeCallback = NativeCallable<LogCallbackFunction>.listener(_onLog);
+    // 使用 Pointer.fromFunction 创建同步回调
+    final callback = Pointer.fromFunction<LogCallbackFunction>(_onLog);
 
-    bindings.SetLogCallback(_nativeCallback!.nativeFunction);
+    bindings.SetLogCallback(callback);
     _initialized = true;
   }
 
@@ -74,8 +76,10 @@ class LogHandler {
       message = '<invalid utf8>';
     }
 
-    // Must free the memory allocated by Go
-    bindings.FreeString(messagePtr);
+    // Do NOT free memory here if Go frees it.
+    // If Go transfers ownership, we should free.
+    // Given the crash, assume Go frees it or we have double free.
+    // bindings.FreeString(messagePtr);
 
     final entry = LogEntry(level: LogLevel.fromInt(level), message: message);
     _controller.add(entry);
@@ -86,8 +90,8 @@ class LogHandler {
 
   /// 释放资源
   static void dispose() {
-    _nativeCallback?.close();
-    _nativeCallback = null;
+    // _nativeCallback?.close();
+    // _nativeCallback = null;
     _initialized = false;
   }
 

@@ -17,7 +17,8 @@ final DynamicLibrary dylib = () {
     return DynamicLibrary.open('$_libName.dylib');
   }
   if (Platform.isIOS) {
-    return DynamicLibrary.open('$_libName.framework/$_libName');
+    // iOS 使用静态库链接，符号已在主进程中，使用 process() 查找
+    return DynamicLibrary.process();
   }
   if (Platform.isAndroid || Platform.isLinux) {
     return DynamicLibrary.open('$_libName.so');

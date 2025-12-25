@@ -35,11 +35,24 @@ Pod::Spec.new do |s|
     'DEFINES_MODULE' => 'YES', 
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/Frameworks @loader_path/Frameworks',
-    # 确保链接器能找到静态库
     'OTHER_LDFLAGS' => '$(inherited) -ObjC',
   }
   
-  s.user_target_xcconfig = {
-    'OTHER_LDFLAGS' => '$(inherited) -ObjC',
-  }
+  # 读取导出符号列表，使用 -exported_symbol（单数）添加每个符号
+  # 这不会替换默认导出列表，所以 _main 等符号仍然存在
+  exports_file = File.expand_path('librelay_exports.txt', __dir__)
+  if File.exist?(exports_file)
+    symbols = File.readlines(exports_file).map(&:strip).reject(&:empty?)
+    exported_flags = symbols.map { |sym| "-Wl,-exported_symbol,#{sym}" }.join(' ')
+    
+    s.user_target_xcconfig = {
+      # 必须手动导出 _main，否则 "No entry point found"
+      # 同时导出 Go 符号
+      'OTHER_LDFLAGS' => "$(inherited) -ObjC -Wl,-exported_symbol,_main #{exported_flags}",
+    }
+  else
+    s.user_target_xcconfig = {
+      'OTHER_LDFLAGS' => '$(inherited) -ObjC',
+    }
+  end
 end

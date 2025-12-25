@@ -40,7 +40,7 @@ class EventHandler {
   static final StreamController<SfuEvent> _controller =
       StreamController<SfuEvent>.broadcast();
 
-  static NativeCallable<EventCallbackFunction>? _nativeCallback;
+  // static NativeCallable<EventCallbackFunction>? _nativeCallback;
   static bool _initialized = false;
 
   /// 事件流
@@ -52,11 +52,12 @@ class EventHandler {
   static void init() {
     if (_initialized) return;
 
-    // 创建 NativeCallable.listener (在独立的 Dart isolate 中运行)
-    _nativeCallback = NativeCallable<EventCallbackFunction>.listener(_onEvent);
+    // 使用 Pointer.fromFunction 创建同步回调
+    // 这样可以在 Go 函数返回前处理数据，避免 UAF 问题
+    final callback = Pointer.fromFunction<EventCallbackFunction>(_onEvent);
 
     // 注册到 Go 层
-    bindings.SetEventCallback(_nativeCallback!.nativeFunction);
+    bindings.SetEventCallback(callback);
     _initialized = true;
   }
 
@@ -90,8 +91,8 @@ class EventHandler {
 
   /// 释放资源
   static void dispose() {
-    _nativeCallback?.close();
-    _nativeCallback = null;
+    // _nativeCallback?.close();
+    // _nativeCallback = null;
     _initialized = false;
   }
 

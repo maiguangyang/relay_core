@@ -28,7 +28,7 @@ class PingHandler {
   static final StreamController<PingRequest> _controller =
       StreamController<PingRequest>.broadcast();
 
-  static NativeCallable<PingCallbackFunction>? _nativeCallback;
+  // static NativeCallable<PingCallbackFunction>? _nativeCallback;
   static bool _initialized = false;
 
   /// Ping 请求流
@@ -40,9 +40,9 @@ class PingHandler {
   static void init() {
     if (_initialized) return;
 
-    _nativeCallback = NativeCallable<PingCallbackFunction>.listener(_onPing);
+    final callback = Pointer.fromFunction<PingCallbackFunction>(_onPing);
 
-    bindings.SetPingCallback(_nativeCallback!.nativeFunction);
+    bindings.SetPingCallback(callback);
     _initialized = true;
   }
 
@@ -58,8 +58,8 @@ class PingHandler {
 
   /// 释放资源
   static void dispose() {
-    _nativeCallback?.close();
-    _nativeCallback = null;
+    // _nativeCallback?.close();
+    // _nativeCallback = null;
     _initialized = false;
   }
 
