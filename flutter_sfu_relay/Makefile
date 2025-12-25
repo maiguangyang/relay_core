@@ -5,7 +5,7 @@ BUILD_DIR := ../build
 
 .PHONY: copy clean copy-ios copy-macos copy-android copy-windows copy-linux
 
-copy: copy-ios copy-macos copy-android copy-windows copy-linux
+copy: clean copy-ios copy-macos copy-android copy-windows copy-linux
 
 copy-ios:
 	@echo "👉 Copying iOS artifacts..."

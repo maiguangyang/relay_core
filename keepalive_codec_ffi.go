@@ -50,7 +50,6 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/maiguangyang/relay_core/pkg/sfu"
 	"github.com/maiguangyang/relay_core/pkg/utils"
@@ -138,8 +137,9 @@ func KeepaliveCreate(roomID *C.char, intervalMs C.int, timeoutMs C.int) C.int {
 		emitEvent(EventTypePing, goRoomID, peerID, "")
 
 		// 同时调用 C 回调（如果设置了）
+		// NOTE: 不使用 defer C.free，因为 Dart 使用 NativeCallable.listener (async)
+		// Dart 负责释放这块内存
 		cPeerID := C.CString(peerID)
-		defer C.free(unsafe.Pointer(cPeerID))
 		C.callPingCallback(cPeerID)
 	})
 

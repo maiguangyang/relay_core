@@ -277,15 +277,14 @@ func GetVersion() *C.char {
 }
 
 // emitEvent sends an event through the callback
+// IMPORTANT: Since Dart uses NativeCallable.listener (async), we transfer memory
+// ownership to Dart. Dart is responsible for calling FreeString() on these pointers.
 func emitEvent(eventType int, roomID, peerID, data string) {
 	cRoomID := C.CString(roomID)
 	cPeerID := C.CString(peerID)
 	cData := C.CString(data)
 
-	defer C.free(unsafe.Pointer(cRoomID))
-	defer C.free(unsafe.Pointer(cPeerID))
-	defer C.free(unsafe.Pointer(cData))
-
+	// Do NOT free here - Dart owns this memory now and will call FreeString()
 	C.callEventCallback(C.int(eventType), cRoomID, cPeerID, cData)
 }
 

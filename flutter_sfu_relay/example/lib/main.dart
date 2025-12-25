@@ -45,7 +45,7 @@ class _MyAppState extends State<MyApp> {
 
   // LiveKit Config (请修改为你的 LiveKit 服务器)
   final _urlController = TextEditingController(text: 'ws://localhost:7880');
-  final _tokenController = TextEditingController(text: 'your-token-here');
+  final _tokenController = TextEditingController(text: '');
 
   @override
   void initState() {

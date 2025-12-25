@@ -4,7 +4,6 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -42,25 +41,28 @@ class LogEntry {
 }
 
 /// 日志处理器
+///
+/// 使用 NativeCallable.listener 注册 Go 层回调
+/// NativeCallable.listener 是线程安全的，可以从任意线程调用
 class LogHandler {
   static final StreamController<LogEntry> _controller =
       StreamController<LogEntry>.broadcast();
 
-  // static NativeCallable<LogCallbackFunction>? _nativeCallback;
+  static NativeCallable<LogCallbackFunction>? _nativeCallback;
   static bool _initialized = false;
 
   /// 日志流
   static Stream<LogEntry> get logs => _controller.stream;
 
   /// 初始化日志处理器
-  /// 初始化日志处理器
   static void init() {
     if (_initialized) return;
 
-    // 使用 Pointer.fromFunction 创建同步回调
-    final callback = Pointer.fromFunction<LogCallbackFunction>(_onLog);
+    // 使用 NativeCallable.listener 创建线程安全的异步回调
+    // 这样可以从任意 Go goroutine 安全调用
+    _nativeCallback = NativeCallable<LogCallbackFunction>.listener(_onLog);
 
-    bindings.SetLogCallback(callback);
+    bindings.SetLogCallback(_nativeCallback!.nativeFunction);
     _initialized = true;
   }
 
@@ -76,10 +78,9 @@ class LogHandler {
       message = '<invalid utf8>';
     }
 
-    // Do NOT free memory here if Go frees it.
-    // If Go transfers ownership, we should free.
-    // Given the crash, assume Go frees it or we have double free.
-    // bindings.FreeString(messagePtr);
+    // 释放 Go 层分配的内存
+    // 因为使用 NativeCallable.listener (async)，Go 转移了内存所有权给 Dart
+    bindings.FreeString(messagePtr);
 
     final entry = LogEntry(level: LogLevel.fromInt(level), message: message);
     _controller.add(entry);
@@ -90,8 +91,8 @@ class LogHandler {
 
   /// 释放资源
   static void dispose() {
-    // _nativeCallback?.close();
-    // _nativeCallback = null;
+    _nativeCallback?.close();
+    _nativeCallback = null;
     _initialized = false;
   }
 
