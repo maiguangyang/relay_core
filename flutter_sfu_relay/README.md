@@ -46,6 +46,7 @@
 | [架构概述](docs/architecture.md) | 模块结构和数据流 |
 | [选举系统](docs/election.md) | 评分规则和选举流程 |
 | [LiveKit 集成](docs/livekit-integration.md) | 与 LiveKit 配合使用 |
+| [平台权限配置](docs/platform-permissions.md) | 各平台权限设置指南 |
 | [API 参考](docs/api-reference.md) | 完整 API 文档 |
 
 ```yaml

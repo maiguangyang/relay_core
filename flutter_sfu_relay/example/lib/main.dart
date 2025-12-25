@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
+import 'pages/home_page.dart';
+
 void main() {
   // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
   // Go层现在有50ms grace period来让进行中的回调完成
@@ -268,6 +270,18 @@ class _MyAppState extends State<MyApp> {
                   ],
                 ),
               ),
+            // 美观版会议 UI
+            Builder(
+              builder: (navContext) => IconButton(
+                icon: const Icon(Icons.meeting_room),
+                tooltip: '美观版会议 UI',
+                onPressed: () {
+                  Navigator.of(navContext).push(
+                    MaterialPageRoute(builder: (context) => const HomePage()),
+                  );
+                },
+              ),
+            ),
           ],
         ),
         body: Padding(
