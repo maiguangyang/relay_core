@@ -121,12 +121,6 @@ class _HomePageState extends State<HomePage> {
       _errorMessage = null;
     });
 
-    // 请求权限
-    if (!await _requestPermissions()) {
-      setState(() => _isConnecting = false);
-      return;
-    }
-
     try {
       // 1. 创建并连接 LiveKit 房间
       _room = lk.Room(
@@ -181,8 +175,7 @@ class _HomePageState extends State<HomePage> {
         _updateParticipants();
       });
 
-      // 6. 默认启用麦克风
-      await _toggleMic();
+      // 默认静音，用户可点击麦克风按钮开启
     } catch (e) {
       setState(() {
         _isConnecting = false;
@@ -256,11 +249,22 @@ class _HomePageState extends State<HomePage> {
     if (_localParticipant == null) return;
 
     final newState = !_controlState.micEnabled;
-    await _localParticipant!.setMicrophoneEnabled(newState);
 
-    setState(() {
-      _controlState = _controlState.copyWith(micEnabled: newState);
-    });
+    // 开启麦克风时请求权限
+    if (newState && !await _requestPermissions()) {
+      return;
+    }
+
+    try {
+      await _localParticipant!.setMicrophoneEnabled(newState);
+      setState(() {
+        _controlState = _controlState.copyWith(micEnabled: newState);
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('无法启用麦克风: $e')));
+    }
   }
 
   Future<void> _toggleCamera() async {
@@ -303,7 +307,17 @@ class _HomePageState extends State<HomePage> {
             ),
           );
           await _localParticipant!.publishVideoTrack(track);
+        } else if (!kIsWeb && Platform.isIOS) {
+          // iOS: 需要 Broadcast Extension，模拟器不支持
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('iOS 屏幕共享需要在真机上运行，且需配置 Broadcast Extension'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+          return;
         } else {
+          // Android 和其他平台
           await _localParticipant!.setScreenShareEnabled(true);
         }
       } else {

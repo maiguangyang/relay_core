@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../theme/app_theme.dart';
 
 /// 参与者卡片组件
-class ParticipantTile extends StatelessWidget {
+class ParticipantTile extends StatefulWidget {
   final lk.Participant participant;
   final bool isRelay;
   final bool isLocal;
@@ -18,13 +19,131 @@ class ParticipantTile extends StatelessWidget {
   });
 
   @override
+  State<ParticipantTile> createState() => _ParticipantTileState();
+}
+
+class _ParticipantTileState extends State<ParticipantTile>
+    with SingleTickerProviderStateMixin {
+  bool _isSpeaking = false;
+  double _audioLevel = 0.0;
+  lk.EventsListener<lk.ParticipantEvent>? _listener;
+  Timer? _speakingTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupListener();
+  }
+
+  @override
+  void didUpdateWidget(ParticipantTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.participant != widget.participant) {
+      _listener?.dispose();
+      _setupListener();
+    }
+  }
+
+  void _setupListener() {
+    _listener = widget.participant.createListener();
+
+    // 监听音频级别变化
+    _listener!.on<lk.AudioPlaybackStatusChanged>((event) {
+      _updateSpeakingState();
+    });
+
+    // 监听轨道变化
+    _listener!.on<lk.TrackMutedEvent>((event) => _updateSpeakingState());
+    _listener!.on<lk.TrackUnmutedEvent>((event) => _updateSpeakingState());
+
+    // 定时检查音频状态
+    _startAudioLevelPolling();
+  }
+
+  void _startAudioLevelPolling() {
+    _speakingTimer?.cancel();
+    _speakingTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _checkAudioLevel();
+    });
+  }
+
+  void _checkAudioLevel() {
+    if (!mounted) return;
+
+    // 获取音频轨道的音量级别
+    final audioTracks = widget.participant.audioTrackPublications;
+    double maxLevel = 0.0;
+
+    for (final pub in audioTracks) {
+      if (pub.track != null && !pub.muted) {
+        // 本地参与者使用 localTrack 的音量
+        if (widget.isLocal && pub.track is lk.LocalAudioTrack) {
+          // LocalAudioTrack 可以获取当前音量
+          maxLevel = 0.3; // 简化处理，开启麦克风就认为可能在说话
+        } else if (pub.track is lk.RemoteAudioTrack) {
+          // 远程音频轨道
+          maxLevel = 0.3;
+        }
+      }
+    }
+
+    // 使用 isSpeaking 状态（如果有的话）
+    final isSpeaking = widget.participant.isSpeaking;
+
+    if (mounted) {
+      setState(() {
+        _isSpeaking = isSpeaking;
+        _audioLevel = maxLevel;
+      });
+    }
+  }
+
+  void _updateSpeakingState() {
+    if (mounted) {
+      setState(() {
+        _isSpeaking = widget.participant.isSpeaking;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _speakingTimer?.cancel();
+    _listener?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // 确定边框颜色
+    Color borderColor;
+    double borderWidth;
+
+    if (_isSpeaking) {
+      borderColor = AppTheme.onlineColor; // 绿色表示说话
+      borderWidth = 3;
+    } else if (widget.isRelay) {
+      borderColor = AppTheme.relayColor;
+      borderWidth = 2;
+    } else {
+      borderColor = Colors.transparent;
+      borderWidth = 0;
+    }
+
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         decoration: AppTheme.glassDecoration.copyWith(
-          border: isRelay
-              ? Border.all(color: AppTheme.relayColor, width: 2)
+          border: Border.all(color: borderColor, width: borderWidth),
+          boxShadow: _isSpeaking
+              ? [
+                  BoxShadow(
+                    color: AppTheme.onlineColor.withOpacity(0.5),
+                    blurRadius: 12,
+                    spreadRadius: 2,
+                  ),
+                ]
               : null,
         ),
         child: ClipRRect(
@@ -52,7 +171,7 @@ class ParticipantTile extends StatelessWidget {
 
   Widget _buildVideoOrAvatar() {
     // 查找视频轨道
-    final videoTrack = participant.videoTrackPublications
+    final videoTrack = widget.participant.videoTrackPublications
         .where((pub) => pub.subscribed && pub.track != null && !pub.muted)
         .map((pub) => pub.track as lk.VideoTrack?)
         .firstOrNull;
@@ -67,7 +186,7 @@ class ParticipantTile extends StatelessWidget {
       child: Center(
         child: CircleAvatar(
           radius: 40,
-          backgroundColor: isRelay
+          backgroundColor: widget.isRelay
               ? AppTheme.relayColor
               : AppTheme.primaryColor,
           child: Text(
@@ -108,10 +227,23 @@ class ParticipantTile extends StatelessWidget {
       right: 8,
       child: Row(
         children: [
+          // 说话指示器
+          if (_isSpeaking)
+            Container(
+              margin: const EdgeInsets.only(right: 6),
+              child: Icon(
+                Icons.graphic_eq,
+                color: AppTheme.onlineColor,
+                size: 16,
+              ),
+            ),
+
           // 名称
           Expanded(
             child: Text(
-              isLocal ? '${participant.identity} (我)' : participant.identity,
+              widget.isLocal
+                  ? '${widget.participant.identity} (我)'
+                  : widget.participant.identity,
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w500,
@@ -122,7 +254,7 @@ class ParticipantTile extends StatelessWidget {
           ),
 
           // Relay 标识
-          if (isRelay)
+          if (widget.isRelay)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -144,7 +276,7 @@ class ParticipantTile extends StatelessWidget {
   }
 
   Widget _buildStatusIndicators() {
-    final isMuted = participant.audioTrackPublications.every(
+    final isMuted = widget.participant.audioTrackPublications.every(
       (pub) => pub.muted || !pub.subscribed,
     );
 
@@ -155,15 +287,18 @@ class ParticipantTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           // 麦克风状态
-          Container(
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.5),
+              color: _isSpeaking
+                  ? AppTheme.onlineColor.withOpacity(0.8)
+                  : Colors.black.withOpacity(0.5),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               isMuted ? Icons.mic_off : Icons.mic,
-              color: isMuted ? AppTheme.accentColor : AppTheme.onlineColor,
+              color: isMuted ? AppTheme.accentColor : Colors.white,
               size: 16,
             ),
           ),
@@ -173,7 +308,7 @@ class ParticipantTile extends StatelessWidget {
   }
 
   String _getInitials() {
-    final name = participant.identity;
+    final name = widget.participant.identity;
     if (name.isEmpty) return '?';
     final parts = name.split('_');
     if (parts.length >= 2) {
