@@ -11,6 +11,11 @@ package main
 /*
 #include <stdlib.h>
 #include <stdint.h>
+#include <pthread.h>
+#include <unistd.h>
+
+// Mutex for thread-safe ping callback access
+static pthread_mutex_t pingCallbackMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Ping 回调函数类型
 typedef void (*PingCallback)(const char* peerID);
@@ -19,13 +24,24 @@ typedef void (*PingCallback)(const char* peerID);
 static PingCallback pingCallback = NULL;
 
 static void setPingCallback(PingCallback cb) {
+    pthread_mutex_lock(&pingCallbackMutex);
     pingCallback = cb;
+    pthread_mutex_unlock(&pingCallbackMutex);
+}
+
+static void invalidatePingCallback() {
+    pthread_mutex_lock(&pingCallbackMutex);
+    pingCallback = NULL;
+    pthread_mutex_unlock(&pingCallbackMutex);
+    usleep(50000); // 50ms grace period
 }
 
 static void callPingCallback(const char* peerID) {
+    pthread_mutex_lock(&pingCallbackMutex);
     if (pingCallback != NULL) {
         pingCallback(peerID);
     }
+    pthread_mutex_unlock(&pingCallbackMutex);
 }
 */
 import "C"
@@ -39,6 +55,11 @@ import (
 	"github.com/maiguangyang/relay_core/pkg/sfu"
 	"github.com/maiguangyang/relay_core/pkg/utils"
 )
+
+// clearPingCallback clears the ping callback with grace period - called by CleanupAll in main.go
+func clearPingCallback() {
+	C.invalidatePingCallback()
+}
 
 // KeepaliveManager 实例管理
 var (

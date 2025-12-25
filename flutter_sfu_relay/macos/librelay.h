@@ -25,6 +25,11 @@ extern const char *_GoStringPtr(_GoString_ s);
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <pthread.h>
+#include <unistd.h>
+
+// Mutex for thread-safe ping callback access
+static pthread_mutex_t pingCallbackMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Ping 回调函数类型
 typedef void (*PingCallback)(const char* peerID);
@@ -33,13 +38,24 @@ typedef void (*PingCallback)(const char* peerID);
 static PingCallback pingCallback = NULL;
 
 static void setPingCallback(PingCallback cb) {
+    pthread_mutex_lock(&pingCallbackMutex);
     pingCallback = cb;
+    pthread_mutex_unlock(&pingCallbackMutex);
+}
+
+static void invalidatePingCallback() {
+    pthread_mutex_lock(&pingCallbackMutex);
+    pingCallback = NULL;
+    pthread_mutex_unlock(&pingCallbackMutex);
+    usleep(50000); // 50ms grace period
 }
 
 static void callPingCallback(const char* peerID) {
+    pthread_mutex_lock(&pingCallbackMutex);
     if (pingCallback != NULL) {
         pingCallback(peerID);
     }
+    pthread_mutex_unlock(&pingCallbackMutex);
 }
 
 #line 1 "cgo-generated-wrapper"
@@ -48,6 +64,15 @@ static void callPingCallback(const char* peerID) {
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <pthread.h>
+#include <unistd.h>
+
+// Generation counter for detecting stale callbacks
+// Incremented each time callbacks are set or cleared
+static volatile int64_t callbackGeneration = 0;
+
+// Mutex for thread-safe callback access
+static pthread_mutex_t callbackMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Callback function types for events
 typedef void (*EventCallback)(int eventType, const char* roomId, const char* peerId, const char* data);
@@ -57,26 +82,53 @@ typedef void (*LogCallback)(int level, const char* message);
 static EventCallback eventCallback = NULL;
 static LogCallback logCallback = NULL;
 
-// Setter functions
+// Get current generation (for Go code to check before/after)
+static int64_t getCallbackGeneration() {
+    return callbackGeneration;
+}
+
+// Setter functions - increment generation on each change
 static void setEventCallback(EventCallback cb) {
+    pthread_mutex_lock(&callbackMutex);
     eventCallback = cb;
+    callbackGeneration++;
+    pthread_mutex_unlock(&callbackMutex);
 }
 
 static void setLogCallback(LogCallback cb) {
+    pthread_mutex_lock(&callbackMutex);
     logCallback = cb;
+    callbackGeneration++;
+    pthread_mutex_unlock(&callbackMutex);
 }
 
-// Caller functions (to be called from Go)
+// Invalidate all callbacks and wait for grace period
+static void invalidateAllCallbacks() {
+    pthread_mutex_lock(&callbackMutex);
+    eventCallback = NULL;
+    logCallback = NULL;
+    callbackGeneration++;
+    pthread_mutex_unlock(&callbackMutex);
+
+    // Grace period: allow any in-flight operations to detect the invalidation
+    usleep(50000); // 50ms
+}
+
+// Caller functions - check if callback is still valid
 static void callEventCallback(int eventType, const char* roomId, const char* peerId, const char* data) {
+    pthread_mutex_lock(&callbackMutex);
     if (eventCallback != NULL) {
         eventCallback(eventType, roomId, peerId, data);
     }
+    pthread_mutex_unlock(&callbackMutex);
 }
 
 static void callLogCallback(int level, const char* message) {
+    pthread_mutex_lock(&callbackMutex);
     if (logCallback != NULL) {
         logCallback(level, message);
     }
+    pthread_mutex_unlock(&callbackMutex);
 }
 
 #line 1 "cgo-generated-wrapper"

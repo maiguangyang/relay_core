@@ -8,6 +8,7 @@ import 'package:livekit_client/livekit_client.dart' as lk;
 
 void main() {
   // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
+  // Go层现在有50ms grace period来让进行中的回调完成
   try {
     SfuRelay.instance.cleanupAll();
   } catch (e) {
@@ -213,6 +214,10 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    // 确保在 widget 销毁时清理 native 回调
+    // 这对于防止 Hot Restart 时的 Race Condition 至关重要
+    SfuRelay.instance.cleanupAll();
+
     _disconnect();
     _urlController.dispose();
     _tokenController.dispose();

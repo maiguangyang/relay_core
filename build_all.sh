@@ -96,18 +96,31 @@ lipo -create -output $OUTPUT_DIR/ios/${PROJECT_NAME}_sim.a \
     $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.a \
     $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_amd64.a
 
-# 2.3 生成 XCFramework (这是 iOS 现代集成的标准方式)
+# 2.3 准备用于 XCFramework 的目录结构
+# CocoaPods 要求 xcframework 中每个 slice 的 library 名称必须相同
+echo "   Preparing files for XCFramework..."
+mkdir -p $OUTPUT_DIR/ios/device
+mkdir -p $OUTPUT_DIR/ios/simulator
+
+# 复制并重命名为统一的名称 (librelay.a)
+cp $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.a $OUTPUT_DIR/ios/device/${PROJECT_NAME}.a
+cp $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.h $OUTPUT_DIR/ios/device/Headers
+cp $OUTPUT_DIR/ios/${PROJECT_NAME}_sim.a $OUTPUT_DIR/ios/simulator/${PROJECT_NAME}.a
+cp $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.h $OUTPUT_DIR/ios/simulator/Headers
+
+# 2.4 生成 XCFramework (这是 iOS 现代集成的标准方式)
 echo "   Creating XCFramework..."
 xcodebuild -create-xcframework \
-    -library $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.a \
-    -headers $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.h \
-    -library $OUTPUT_DIR/ios/${PROJECT_NAME}_sim.a \
-    -headers $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.h \
+    -library $OUTPUT_DIR/ios/device/${PROJECT_NAME}.a \
+    -headers $OUTPUT_DIR/ios/device/Headers \
+    -library $OUTPUT_DIR/ios/simulator/${PROJECT_NAME}.a \
+    -headers $OUTPUT_DIR/ios/simulator/Headers \
     -output $OUTPUT_DIR/ios/$PROJECT_NAME.xcframework
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✔ iOS XCFramework build success${NC}"
     # 清理中间文件
+    rm -rf $OUTPUT_DIR/ios/device $OUTPUT_DIR/ios/simulator
     rm $OUTPUT_DIR/ios/*.a $OUTPUT_DIR/ios/*.h 2>/dev/null || true
 else
     echo -e "${RED}✘ iOS build failed${NC}"
