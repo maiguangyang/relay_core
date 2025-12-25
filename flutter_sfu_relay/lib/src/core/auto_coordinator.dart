@@ -564,18 +564,30 @@ class AutoCoordinator {
     // 告知 Go 层
     _coordinator.receiveClaim(peerId, epoch, score);
 
-    // 已经有稳定的 Relay，不参与选举
-    if (_currentRelay != null) {
-      // 如果我们是 Relay，告知 claimer 当前 Relay 信息
-      if (_currentRelay == localPeerId) {
-        signaling.sendRelayChanged(
-          roomId,
-          localPeerId,
-          _currentEpoch,
-          _localScore,
-        );
+    // 如果我们是当前 Relay，需要比较分数
+    if (_currentRelay == localPeerId) {
+      // claimer 分数更高，让位
+      if (score > _localScore) {
+        _acceptRelay(peerId, epoch, score);
+        return;
       }
-      // 否则忽略 claim（让 claimer 从 Relay 那里获取信息）
+      // 分数相同，比较 PeerId
+      if (score == _localScore && peerId.compareTo(localPeerId) > 0) {
+        _acceptRelay(peerId, epoch, score);
+        return;
+      }
+      // 我们分数更高或 PeerId 更大，发送 relayChanged 告知 claimer
+      signaling.sendRelayChanged(
+        roomId,
+        localPeerId,
+        _currentEpoch,
+        _localScore,
+      );
+      return;
+    }
+
+    // 已有其他 Relay，忽略 claim（claimer 会收到 Relay 的通知）
+    if (_currentRelay != null) {
       return;
     }
 

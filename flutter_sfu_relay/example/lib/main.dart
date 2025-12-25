@@ -44,7 +44,9 @@ class _MyAppState extends State<MyApp> {
   bool _isConnecting = false;
 
   // LiveKit Config (请修改为你的 LiveKit 服务器)
-  final _urlController = TextEditingController(text: 'ws://localhost:7880');
+  final _urlController = TextEditingController(
+    text: 'ws://192.167.167.129:7880',
+  );
   final _tokenController = TextEditingController(text: '');
 
   @override
