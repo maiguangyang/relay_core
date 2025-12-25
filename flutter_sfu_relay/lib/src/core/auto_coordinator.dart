@@ -211,7 +211,7 @@ class AutoCoordinator {
       _updateState(AutoCoordinatorState.electing);
 
       if (config.autoElection) {
-        _startElection();
+        _startElection(isInitial: true); // 初始选举使用更长超时
       }
     } catch (e) {
       _updateState(AutoCoordinatorState.error);
@@ -653,9 +653,18 @@ class AutoCoordinator {
     final epoch = data?['epoch'] as int? ?? 0;
     final score = (data?['score'] as num?)?.toDouble() ?? 0.0;
 
-    if (epoch < _currentEpoch || relayId.isEmpty) return;
+    // 忽略无效消息
+    if (relayId.isEmpty || relayId == localPeerId) return;
 
-    // 如果我们当前是 Relay，比较分数决定是否接受
+    // 只忽略明显过期的 epoch（小于当前 epoch），相同 epoch 仍需处理
+    if (epoch < _currentEpoch) return;
+
+    // 更新 epoch 如果更高
+    if (epoch > _currentEpoch) {
+      _currentEpoch = epoch;
+    }
+
+    // 如果我们当前是 Relay，需要比较分数决定是否接受
     if (_currentRelay == localPeerId) {
       // 对方分数更高，接受
       if (score > _localScore) {
@@ -677,8 +686,20 @@ class AutoCoordinator {
       return;
     }
 
-    // 我们不是 Relay，直接接受
-    _acceptRelay(relayId, epoch, score);
+    // 我们不是 Relay
+    // 如果还没有 Relay 或者新 Relay 比当前 Relay 更优，接受
+    if (_currentRelay == null) {
+      _acceptRelay(relayId, epoch, score);
+      return;
+    }
+
+    // 比较新 Relay 和当前 Relay
+    if (score > _currentRelayScore ||
+        (score == _currentRelayScore &&
+            relayId.compareTo(_currentRelay!) > 0)) {
+      _acceptRelay(relayId, epoch, score);
+    }
+    // 否则保持当前 Relay
   }
 
   void _handleSfuEvent(SfuEvent event) {
@@ -716,19 +737,21 @@ class AutoCoordinator {
     signaling.sendPing(roomId, request.peerId);
   }
 
-  void _startElection() {
+  void _startElection({bool isInitial = false}) {
     _broadcastClaim();
 
     // 设置选举超时
-    _electionTimer = Timer(
-      Duration(milliseconds: config.electionTimeoutMs),
-      () {
-        // 超时后，如果没有确定 Relay，自己成为 Relay
-        if (_currentRelay == null) {
-          _becomeRelay();
-        }
-      },
-    );
+    // 初始选举使用更长时间（2x），给现有 Relay 时间来通知我们
+    final timeoutMs = isInitial
+        ? config.electionTimeoutMs * 2
+        : config.electionTimeoutMs;
+
+    _electionTimer = Timer(Duration(milliseconds: timeoutMs), () {
+      // 超时后，如果没有确定 Relay，自己成为 Relay
+      if (_currentRelay == null) {
+        _becomeRelay();
+      }
+    });
   }
 
   void _broadcastClaim() {

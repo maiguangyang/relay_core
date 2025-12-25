@@ -116,7 +116,7 @@ class _MyAppState extends State<MyApp> {
           deviceType: _detectDeviceType(),
           connectionType: ConnectionType.wifi,
           powerState: PowerState.pluggedIn,
-          electionTimeoutMs: 3000,
+          // electionTimeoutMs 使用默认值 1000ms
           autoElection: true,
         ),
       );
@@ -240,7 +240,7 @@ class _MyAppState extends State<MyApp> {
       ),
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('SFU Relay + LiveKit'),
+          title: const Text('SFU Relay'),
           backgroundColor: Colors.teal.shade800,
           actions: [
             if (_isRelay)
