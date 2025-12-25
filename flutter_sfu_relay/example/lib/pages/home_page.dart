@@ -47,6 +47,10 @@ class _HomePageState extends State<HomePage> {
   // 参与者列表
   final List<lk.Participant> _participants = [];
 
+  // 屏幕共享状态
+  lk.Participant? _screenShareParticipant;
+  bool _isScreenShareMaximized = true; // 默认最大化显示
+
   // 控制状态
   ControlState _controlState = const ControlState();
 
@@ -192,7 +196,34 @@ class _HomePageState extends State<HomePage> {
       ..on<lk.TrackUnpublishedEvent>((_) => _updateParticipants())
       ..on<lk.TrackSubscribedEvent>((_) => _updateParticipants())
       ..on<lk.TrackMutedEvent>((_) => _updateParticipants())
-      ..on<lk.TrackUnmutedEvent>((_) => _updateParticipants());
+      ..on<lk.TrackUnmutedEvent>((_) => _updateParticipants())
+      // 本地轨道发布/取消发布事件
+      ..on<lk.LocalTrackPublishedEvent>((event) {
+        _updateParticipants();
+        _updateControlState();
+      })
+      ..on<lk.LocalTrackUnpublishedEvent>((event) {
+        _updateParticipants();
+        _updateControlState();
+      });
+  }
+
+  void _updateControlState() {
+    if (_localParticipant == null) return;
+
+    // 检查本地屏幕共享状态
+    final hasScreenShare = _localParticipant!.videoTrackPublications.any(
+      (pub) =>
+          pub.source == lk.TrackSource.screenShareVideo && pub.track != null,
+    );
+
+    if (_controlState.screenShareEnabled != hasScreenShare) {
+      setState(() {
+        _controlState = _controlState.copyWith(
+          screenShareEnabled: hasScreenShare,
+        );
+      });
+    }
   }
 
   void _updateParticipants() {
@@ -204,6 +235,24 @@ class _HomePageState extends State<HomePage> {
         _participants.add(_localParticipant!);
       }
       _participants.addAll(_room!.remoteParticipants.values);
+
+      // 检测屏幕共享参与者
+      _screenShareParticipant = null;
+      for (final p in _participants) {
+        final isLocal = p.identity == _localParticipant?.identity;
+        for (final pub in p.videoTrackPublications) {
+          if (pub.source == lk.TrackSource.screenShareVideo &&
+              pub.track != null &&
+              !pub.muted) {
+            // 本地参与者不需要检查 subscribed，远程参与者需要
+            if (isLocal || pub.subscribed) {
+              _screenShareParticipant = p;
+              break;
+            }
+          }
+        }
+        if (_screenShareParticipant != null) break;
+      }
     });
   }
 
@@ -290,6 +339,20 @@ class _HomePageState extends State<HomePage> {
 
     try {
       if (newState) {
+        // 检查是否已有人在分享屏幕
+        if (_screenShareParticipant != null &&
+            _screenShareParticipant!.identity != _localParticipant?.identity) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '“${_screenShareParticipant!.identity}” 正在分享屏幕，请等待结束后再试',
+              ),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          return;
+        }
+
         // 开启屏幕共享
         if (!kIsWeb && (Platform.isMacOS || Platform.isWindows)) {
           // 桌面平台：使用窗口选择器
@@ -516,12 +579,205 @@ class _HomePageState extends State<HomePage> {
         Expanded(child: _buildParticipantGrid()),
         ControlBar(
           state: _controlState.copyWith(isRelay: _autoCoord?.isRelay ?? false),
+          participantCount: _participants.length,
           onMicToggle: _toggleMic,
           onCameraToggle: _toggleCamera,
           onScreenShareToggle: _toggleScreenShare,
+          onParticipants: _showParticipantsDrawer,
           onLeave: _leave,
         ),
       ],
+    );
+  }
+
+  void _showParticipantsDrawer() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Participants',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 320,
+              height: double.infinity,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceDark,
+                borderRadius: const BorderRadius.horizontal(
+                  left: Radius.circular(20),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 20,
+                    offset: const Offset(-5, 0),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  // 标题栏
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.people, color: AppTheme.primaryColor),
+                        const SizedBox(width: 12),
+                        Text(
+                          '参与者 (${_participants.length})',
+                          style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: AppTheme.textSecondary,
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(color: AppTheme.cardDark, height: 1),
+                  // 参与者列表
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _participants.length,
+                      itemBuilder: (context, index) {
+                        final participant = _participants[index];
+                        final isLocal =
+                            participant.identity == _localParticipant?.identity;
+                        final isRelay = participant.identity == _currentRelay;
+                        final isScreenSharing =
+                            participant.identity ==
+                            _screenShareParticipant?.identity;
+                        final isMuted = participant.audioTrackPublications
+                            .every((pub) => pub.muted || !pub.subscribed);
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.cardDark,
+                            borderRadius: BorderRadius.circular(12),
+                            border: isRelay
+                                ? Border.all(
+                                    color: AppTheme.relayColor,
+                                    width: 2,
+                                  )
+                                : null,
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: isRelay
+                                    ? AppTheme.relayColor
+                                    : AppTheme.primaryColor,
+                                child: Text(
+                                  participant.identity.isNotEmpty
+                                      ? participant.identity[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isLocal
+                                          ? '${participant.identity} (我)'
+                                          : participant.identity,
+                                      style: const TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (isRelay || isScreenSharing) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          if (isRelay)
+                                            _buildTag(
+                                              'RELAY',
+                                              AppTheme.relayColor,
+                                            ),
+                                          if (isScreenSharing)
+                                            _buildTag(
+                                              '共享',
+                                              AppTheme.secondaryColor,
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                isMuted ? Icons.mic_off : Icons.mic,
+                                color: isMuted
+                                    ? AppTheme.textSecondary
+                                    : AppTheme.onlineColor,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+          child: child,
+        );
+      },
+    );
+  }
+
+  Widget _buildTag(String text, Color color) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color, width: 1),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 
@@ -592,6 +848,12 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
+    // 如果有人在分享屏幕且已最大化，使用特刊布局
+    if (_screenShareParticipant != null && _isScreenShareMaximized) {
+      return _buildFeaturedLayout();
+    }
+
+    // 正常网格布局
     return Padding(
       padding: const EdgeInsets.all(8),
       child: GridView.builder(
@@ -606,14 +868,190 @@ class _HomePageState extends State<HomePage> {
           final participant = _participants[index];
           final isLocal = participant.identity == _localParticipant?.identity;
           final isRelay = participant.identity == _currentRelay;
+          final isScreenSharing =
+              participant.identity == _screenShareParticipant?.identity;
 
           return ParticipantTile(
             participant: participant,
             isLocal: isLocal,
             isRelay: isRelay,
+            isScreenSharing: isScreenSharing,
+            isMaximized: _isScreenShareMaximized,
+            onMaximize: isScreenSharing
+                ? () => setState(
+                    () => _isScreenShareMaximized = !_isScreenShareMaximized,
+                  )
+                : null,
           );
         },
       ),
+    );
+  }
+
+  /// 特刊布局：屏幕共享者放大显示，其他参与者在下方小图
+  Widget _buildFeaturedLayout() {
+    final screenSharer = _screenShareParticipant!;
+    final isSharerLocal = screenSharer.identity == _localParticipant?.identity;
+    final isSharerRelay = screenSharer.identity == _currentRelay;
+
+    // 获取屏幕共享视频轨道
+    lk.VideoTrack? screenTrack;
+    for (final pub in screenSharer.videoTrackPublications) {
+      if (pub.source == lk.TrackSource.screenShareVideo &&
+          pub.subscribed &&
+          pub.track != null &&
+          !pub.muted) {
+        screenTrack = pub.track as lk.VideoTrack;
+        break;
+      }
+    }
+
+    // 其他参与者（排除屏幕共享者）
+    final otherParticipants = _participants
+        .where((p) => p.identity != screenSharer.identity)
+        .toList();
+
+    return Column(
+      children: [
+        // 屏幕共享主视图
+        Expanded(
+          flex: 3,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.secondaryColor, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.secondaryColor.withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // 屏幕共享视频 - 使用 FittedBox 确保完整显示
+                    if (screenTrack != null)
+                      Container(
+                        color: Colors.black,
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: SizedBox(
+                            width: 1920,
+                            height: 1080,
+                            child: lk.VideoTrackRenderer(screenTrack),
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        color: AppTheme.cardDark,
+                        child: const Center(
+                          child: Icon(
+                            Icons.screen_share,
+                            size: 48,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                    // 分享者标签
+                    Positioned(
+                      bottom: 12,
+                      left: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.secondaryColor,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.screen_share,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              isSharerLocal
+                                  ? '你正在分享屏幕'
+                                  : '${screenSharer.identity} 的屏幕',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // 其他参与者小图列表
+        if (otherParticipants.isNotEmpty)
+          SizedBox(
+            height: 120,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              itemCount: otherParticipants.length + 1, // +1 为分享者的小头像
+              itemBuilder: (context, index) {
+                // 第一个显示分享者
+                if (index == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 160,
+                      child: ParticipantTile(
+                        participant: screenSharer,
+                        isLocal: isSharerLocal,
+                        isRelay: isSharerRelay,
+                        isScreenSharing: true,
+                        isMaximized: _isScreenShareMaximized,
+                        onMaximize: () => setState(
+                          () => _isScreenShareMaximized =
+                              !_isScreenShareMaximized,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                final participant = otherParticipants[index - 1];
+                final isLocal =
+                    participant.identity == _localParticipant?.identity;
+                final isRelay = participant.identity == _currentRelay;
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SizedBox(
+                    width: 160,
+                    child: ParticipantTile(
+                      participant: participant,
+                      isLocal: isLocal,
+                      isRelay: isRelay,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 

@@ -8,14 +8,20 @@ class ParticipantTile extends StatefulWidget {
   final lk.Participant participant;
   final bool isRelay;
   final bool isLocal;
+  final bool isScreenSharing;
+  final bool isMaximized;
   final VoidCallback? onTap;
+  final VoidCallback? onMaximize;
 
   const ParticipantTile({
     super.key,
     required this.participant,
     this.isRelay = false,
     this.isLocal = false,
+    this.isScreenSharing = false,
+    this.isMaximized = false,
     this.onTap,
+    this.onMaximize,
   });
 
   @override
@@ -286,6 +292,29 @@ class _ParticipantTileState extends State<ParticipantTile>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 最大化/缩小按钮 (仅屏幕共享时显示)
+          if (widget.isScreenSharing && widget.onMaximize != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: GestureDetector(
+                onTap: widget.onMaximize,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.secondaryColor.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    widget.isMaximized
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
+            ),
+
           // 麦克风状态
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),

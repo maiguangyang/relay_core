@@ -36,7 +36,9 @@ class ControlBar extends StatelessWidget {
   final VoidCallback? onMicToggle;
   final VoidCallback? onCameraToggle;
   final VoidCallback? onScreenShareToggle;
+  final VoidCallback? onParticipants;
   final VoidCallback? onLeave;
+  final int participantCount;
 
   const ControlBar({
     super.key,
@@ -44,7 +46,9 @@ class ControlBar extends StatelessWidget {
     this.onMicToggle,
     this.onCameraToggle,
     this.onScreenShareToggle,
+    this.onParticipants,
     this.onLeave,
+    this.participantCount = 0,
   });
 
   @override
@@ -92,6 +96,15 @@ class ControlBar extends StatelessWidget {
               isEnabled: state.screenShareEnabled,
               activeColor: AppTheme.secondaryColor,
               onTap: onScreenShareToggle,
+            ),
+
+            // 参与者
+            _buildControlButton(
+              icon: Icons.people,
+              label: '用户 ($participantCount)',
+              isEnabled: false,
+              activeColor: AppTheme.primaryColor,
+              onTap: onParticipants,
             ),
 
             // 挂断
