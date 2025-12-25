@@ -7,6 +7,12 @@ import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 
 void main() {
+  // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
+  try {
+    SfuRelay.instance.cleanupAll();
+  } catch (e) {
+    print('Cleanup failed (expected on first run): $e');
+  }
   runApp(const MyApp());
 }
 
@@ -37,9 +43,7 @@ class _MyAppState extends State<MyApp> {
   bool _isConnecting = false;
 
   // LiveKit Config (请修改为你的 LiveKit 服务器)
-  final _urlController = TextEditingController(
-    text: 'wss://your-livekit-server.com',
-  );
+  final _urlController = TextEditingController(text: 'ws://localhost:7880');
   final _tokenController = TextEditingController(text: 'your-token-here');
 
   @override

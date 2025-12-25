@@ -4,11 +4,6 @@ build/
 # Go build cache
 *.exe
 *.exe~
-*.dll
-*.so
-*.dylib
-*.a
-*.h
 
 # Test binary
 *.test

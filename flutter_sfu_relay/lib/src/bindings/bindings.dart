@@ -1,3 +1,8 @@
+/*
+ * @Author: Marlon.M
+ * @Email: maiguangyang@163.com
+ * @Date: 2025-12-25 09:29:31
+ */
 /// FFI 绑定初始化
 library;
 

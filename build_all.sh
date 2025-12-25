@@ -72,7 +72,7 @@ CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
 CC="$(xcrun -sdk iphoneos -find clang) -isysroot $IPHONEOS_SDK -arch arm64" \
 CGO_CFLAGS="-isysroot $IPHONEOS_SDK -arch arm64 -miphoneos-version-min=12.0" \
 CGO_LDFLAGS="-isysroot $IPHONEOS_SDK -arch arm64 -miphoneos-version-min=12.0" \
-go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/ios_arm64.a $GO_ENTRY_POINT
+go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.a $GO_ENTRY_POINT
 
 # 2.2 编译 iPhone 模拟器 (arm64 + amd64)
 # 注意：现在的模拟器很多也是 arm64 (M1/M2/M3 Mac)
@@ -82,27 +82,27 @@ CGO_ENABLED=1 GOOS=ios GOARCH=arm64 \
 CC="$(xcrun -sdk iphonesimulator -find clang) -isysroot $IPHONESIM_SDK -arch arm64" \
 CGO_CFLAGS="-isysroot $IPHONESIM_SDK -arch arm64 -mios-simulator-version-min=12.0" \
 CGO_LDFLAGS="-isysroot $IPHONESIM_SDK -arch arm64 -mios-simulator-version-min=12.0" \
-go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/ios_sim_arm64.a $GO_ENTRY_POINT
+go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.a $GO_ENTRY_POINT
 
 echo "   Building for iOS Simulator (amd64)..."
 CGO_ENABLED=1 GOOS=ios GOARCH=amd64 \
 CC="$(xcrun -sdk iphonesimulator -find clang) -isysroot $IPHONESIM_SDK -arch x86_64" \
 CGO_CFLAGS="-isysroot $IPHONESIM_SDK -arch x86_64 -mios-simulator-version-min=12.0" \
 CGO_LDFLAGS="-isysroot $IPHONESIM_SDK -arch x86_64 -mios-simulator-version-min=12.0" \
-go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/ios_sim_amd64.a $GO_ENTRY_POINT
+go build -ldflags="-s -w -checklinkname=0" -buildmode=c-archive -o $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_amd64.a $GO_ENTRY_POINT
 
 # 合并模拟器架构 (Universal Static Lib)
-lipo -create -output $OUTPUT_DIR/ios/ios_sim.a \
-    $OUTPUT_DIR/ios/ios_sim_arm64.a \
-    $OUTPUT_DIR/ios/ios_sim_amd64.a
+lipo -create -output $OUTPUT_DIR/ios/${PROJECT_NAME}_sim.a \
+    $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.a \
+    $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_amd64.a
 
 # 2.3 生成 XCFramework (这是 iOS 现代集成的标准方式)
 echo "   Creating XCFramework..."
 xcodebuild -create-xcframework \
-    -library $OUTPUT_DIR/ios/ios_arm64.a \
-    -headers $OUTPUT_DIR/ios/ios_arm64.h \
-    -library $OUTPUT_DIR/ios/ios_sim.a \
-    -headers $OUTPUT_DIR/ios/ios_sim_arm64.h \
+    -library $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.a \
+    -headers $OUTPUT_DIR/ios/${PROJECT_NAME}_arm64.h \
+    -library $OUTPUT_DIR/ios/${PROJECT_NAME}_sim.a \
+    -headers $OUTPUT_DIR/ios/${PROJECT_NAME}_sim_arm64.h \
     -output $OUTPUT_DIR/ios/$PROJECT_NAME.xcframework
 
 if [ $? -eq 0 ]; then
