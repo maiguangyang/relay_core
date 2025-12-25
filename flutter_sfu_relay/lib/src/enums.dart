@@ -63,7 +63,9 @@ enum SfuEventType {
   peerOnline(20),
   peerSlow(21),
   peerOffline(22),
-  ping(23);
+  ping(23),
+  // 降级事件
+  relayDisabled(24);
 
   const SfuEventType(this.value);
   final int value;

@@ -32,12 +32,16 @@ class AutoCoordinatorConfig {
   /// 是否自动触发选举
   final bool autoElection;
 
+  /// 最大选举失败次数，超过后降级到直连 SFU 模式
+  final int maxElectionFailures;
+
   const AutoCoordinatorConfig({
     this.deviceType = DeviceType.unknown,
     this.connectionType = ConnectionType.unknown,
     this.powerState = PowerState.unknown,
     this.electionTimeoutMs = 1000, // 1秒选举超时
     this.autoElection = true,
+    this.maxElectionFailures = 3, // 连续3次失败后降级
   });
 }
 
@@ -118,6 +122,10 @@ class AutoCoordinator {
   double _currentRelayScore = 0; // 当前 Relay 的分数
   Timer? _electionTimer;
   Keepalive? _keepalive; // 心跳管理器
+
+  // 选举失败降级机制
+  int _electionFailureCount = 0;
+  bool _relayModeDisabled = false;
 
   final Set<String> _peers = {};
 
@@ -207,11 +215,17 @@ class AutoCoordinator {
       // 6. 设置所有监听
       _setupListeners();
 
-      // 7. 开始选举
-      _updateState(AutoCoordinatorState.electing);
+      // 7. 开始选举或直接连接
+      // maxElectionFailures <= 0 表示禁用 Relay 模式，直接走 SFU
+      if (config.maxElectionFailures <= 0) {
+        _relayModeDisabled = true;
+        _updateState(AutoCoordinatorState.connected);
+      } else {
+        _updateState(AutoCoordinatorState.electing);
 
-      if (config.autoElection) {
-        _startElection(isInitial: true); // 初始选举使用更长超时
+        if (config.autoElection) {
+          _startElection(isInitial: true); // 初始选举使用更长超时
+        }
       }
     } catch (e) {
       _updateState(AutoCoordinatorState.error);
@@ -750,6 +764,12 @@ class AutoCoordinator {
   }
 
   void _startElection({bool isInitial = false}) {
+    // 如果 Relay 模式已降级，不参与选举
+    if (_relayModeDisabled) {
+      _updateState(AutoCoordinatorState.connected);
+      return;
+    }
+
     _broadcastClaim();
 
     // 设置选举超时
@@ -759,11 +779,35 @@ class AutoCoordinator {
         : config.electionTimeoutMs;
 
     _electionTimer = Timer(Duration(milliseconds: timeoutMs), () {
-      // 超时后，如果没有确定 Relay，自己成为 Relay
+      // 超时后，如果没有确定 Relay
       if (_currentRelay == null) {
+        _electionFailureCount++;
+
+        // 检查是否超过最大失败次数
+        if (_electionFailureCount >= config.maxElectionFailures) {
+          _disableRelayMode();
+          return;
+        }
+
+        // 继续尝试成为 Relay
         _becomeRelay();
+      } else {
+        // 选举成功（有 Relay），重置失败计数
+        _electionFailureCount = 0;
       }
     });
+  }
+
+  /// 降级：禁用 Relay 模式，直接走 SFU
+  void _disableRelayMode() {
+    _relayModeDisabled = true;
+    _electionTimer?.cancel();
+    _updateState(AutoCoordinatorState.connected);
+
+    // 通知应用层已降级
+    _errorController.add(
+      'Relay mode disabled after $_electionFailureCount consecutive failures',
+    );
   }
 
   void _broadcastClaim() {

@@ -57,8 +57,9 @@ class RelayService {
         deviceType: DeviceType.pc,           // 设备: PC=40, Pad=30, Mobile=20
         connectionType: ConnectionType.wifi, // 网络: Ethernet=40, WiFi=30
         powerState: PowerState.pluggedIn,    // 电源: PluggedIn=20, Battery=10
-        electionTimeoutMs: 3000,             // 选举超时
+        electionTimeoutMs: 1000,             // 选举超时 (默认 1秒)
         autoElection: true,                  // 自动选举
+        maxElectionFailures: 3,              // 连续失败后降级到直连 SFU
       ),
     );
     

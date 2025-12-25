@@ -30,12 +30,13 @@
 ## 功能特性
 
 - 🚀 **RTP 纯透传转发** - 零解码，超低延迟
-- 🔄 **动态代理选举** - 自动选择最优 Relay
-- ⚡ **自动故障切换** - 无缝切换到备用 Relay
+- 🔄 **动态代理选举** - 自动选择最优 Relay (分数 + PeerId)
+- ⚡ **快速故障切换** - ~2.5 秒自动切换到备用 Relay
+- 💓 **心跳检测** - 1s 间隔，1.5s 超时，快速检测 Peer 离线
 - 📱 **本地分享切换** - 支持屏幕共享优先级
-- 💓 **心跳检测** - 实时监控 Peer 状态
 - 📊 **流量统计** - 带宽和丢包监控
 - 🎚️ **抖动缓冲** - 可选的网络抖动平滑
+- 🔙 **降级机制** - 连续 N 次选举失败后自动降级到直连 SFU
 
 ## 📚 详细文档
 
@@ -277,10 +278,11 @@ lkRoom.onDataReceived = (data, participant, topic) {
 | 10 | SubscriberJoined | 订阅者加入 |
 | 11 | SubscriberLeft | 订阅者离开 |
 | 12 | NeedRenegotiation | 需要重协商 |
-| 20 | PeerOnline | Peer 上线 |
-| 21 | PeerSlow | Peer 响应慢 |
-| 22 | PeerOffline | Peer 离线 |
-| 23 | NeedSendPing | 需要发送 Ping |
+| 20 | PeerOnline | Peer 上线 (心跳检测) |
+| 21 | PeerSlow | Peer 响应慢 (心跳检测) |
+| 22 | PeerOffline | Peer 离线 (心跳超时) |
+| 23 | Ping | 需要发送 Ping |
+| 24 | RelayDisabled | Relay 模式已降级 |
 
 ## 平台支持
 

@@ -31,11 +31,12 @@ final autoCoord = AutoCoordinator(
   localPeerId: 'peer-1',
   signaling: WebSocketSignaling(url: 'ws://...', localPeerId: 'peer-1'),
   config: AutoCoordinatorConfig(
-    deviceType: DeviceType.pc,         // 分数: PC=40, Pad=30, Mobile=20
+    deviceType: DeviceType.pc,           // 分数: PC=40, Pad=30, Mobile=20
     connectionType: ConnectionType.wifi, // 分数: Ethernet=40, WiFi=30
-    powerState: PowerState.pluggedIn,   // 分数: PluggedIn=20, Battery=10
-    electionTimeoutMs: 3000,            // 选举超时
-    autoElection: true,                 // 自动选举
+    powerState: PowerState.pluggedIn,    // 分数: PluggedIn=20, Battery=10
+    electionTimeoutMs: 1000,             // 选举超时 (重选 1s, 初始 2s)
+    autoElection: true,                  // 自动选举
+    maxElectionFailures: 3,              // 连续 N 次选举失败后降级为直连 SFU (0=禁用Relay)
   ),
 );
 
