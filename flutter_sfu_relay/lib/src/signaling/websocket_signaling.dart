@@ -38,6 +38,16 @@ class WebSocketSignaling implements SignalingBridge {
   @override
   Stream<SignalingMessage> get messages => _messageController.stream;
 
+  // WebSocket 信令不直接检测 Peer 断开，依赖心跳或其他机制
+  final _peerDisconnectedController = StreamController<String>.broadcast();
+  @override
+  Stream<String> get peerDisconnected => _peerDisconnectedController.stream;
+
+  // WebSocket 信令不直接检测 Peer 连接
+  final _peerConnectedController = StreamController<String>.broadcast();
+  @override
+  Stream<String> get peerConnected => _peerConnectedController.stream;
+
   @override
   Future<void> connect() async {
     if (_isConnected) return;
@@ -180,13 +190,14 @@ class WebSocketSignaling implements SignalingBridge {
     String roomId,
     String relayId,
     int epoch,
+    double score,
   ) async {
     await _send(
       SignalingMessage(
         type: SignalingMessageType.relayChanged,
         roomId: roomId,
         peerId: localPeerId,
-        data: {'relayId': relayId, 'epoch': epoch},
+        data: {'relayId': relayId, 'epoch': epoch, 'score': score},
       ),
     );
   }

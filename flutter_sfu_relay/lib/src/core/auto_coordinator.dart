@@ -9,6 +9,7 @@ import '../bindings/bindings.dart';
 import '../bindings/utils.dart';
 import '../callbacks/callbacks.dart';
 import '../enums.dart';
+import '../monitoring/keepalive.dart';
 import '../signaling/signaling.dart';
 import 'coordinator.dart';
 
@@ -35,7 +36,7 @@ class AutoCoordinatorConfig {
     this.deviceType = DeviceType.unknown,
     this.connectionType = ConnectionType.unknown,
     this.powerState = PowerState.unknown,
-    this.electionTimeoutMs = 3000,
+    this.electionTimeoutMs = 1000, // 1秒选举超时
     this.autoElection = true,
   });
 }
@@ -114,7 +115,9 @@ class AutoCoordinator {
   String? _currentRelay;
   int _currentEpoch = 0;
   double _localScore = 0;
+  double _currentRelayScore = 0; // 当前 Relay 的分数
   Timer? _electionTimer;
+  Keepalive? _keepalive; // 心跳管理器
 
   final Set<String> _peers = {};
 
@@ -122,6 +125,8 @@ class AutoCoordinator {
   StreamSubscription<SignalingMessage>? _signalingSubscription;
   StreamSubscription<SfuEvent>? _eventSubscription;
   StreamSubscription<PingRequest>? _pingSubscription;
+  StreamSubscription<String>? _peerDisconnectedSubscription;
+  StreamSubscription<String>? _peerConnectedSubscription;
 
   // 事件流
   final _stateController = StreamController<AutoCoordinatorState>.broadcast();
@@ -187,17 +192,22 @@ class AutoCoordinator {
       // 2. 启用 Coordinator
       _coordinator.enable();
 
-      // 3. 更新本机设备信息
+      // 3. 初始化心跳检测 (1s 间隔, 3s 超时)
+      _keepalive = Keepalive(roomId: roomId);
+      _keepalive!.create(intervalMs: 1000, timeoutMs: 1500); // 1秒心跳, 1.5秒超时
+      _keepalive!.start();
+
+      // 4. 更新本机设备信息
       _updateLocalDeviceInfo();
 
-      // 4. 连接信令
+      // 5. 连接信令
       await signaling.connect();
       await signaling.joinRoom(roomId, localPeerId);
 
-      // 5. 设置所有监听
+      // 6. 设置所有监听
       _setupListeners();
 
-      // 6. 开始选举
+      // 7. 开始选举
       _updateState(AutoCoordinatorState.electing);
 
       if (config.autoElection) {
@@ -217,6 +227,13 @@ class AutoCoordinator {
     await _signalingSubscription?.cancel();
     await _eventSubscription?.cancel();
     await _pingSubscription?.cancel();
+    await _peerDisconnectedSubscription?.cancel();
+    await _peerConnectedSubscription?.cancel();
+
+    // 停止心跳检测
+    _keepalive?.stop();
+    _keepalive?.destroy();
+    _keepalive = null;
 
     _coordinator.disable();
 
@@ -242,11 +259,32 @@ class AutoCoordinator {
 
   // ========== 公开方法 ==========
 
+  /// 通知 Peer 断开连接（用于处理外部检测到的断开，如 LiveKit 事件）
+  ///
+  /// 当应用层检测到 Peer 断开（如 LiveKit ParticipantDisconnected）时调用此方法。
+  /// 如果断开的是当前 Relay，会自动触发重新选举。
+  void notifyPeerDisconnected(String peerId) {
+    if (!_peers.contains(peerId)) return;
+
+    _peers.remove(peerId);
+    _coordinator.removePeer(peerId);
+    _peerLeftController.add(peerId);
+
+    // 如果是 Relay 断开，触发重新选举
+    if (peerId == _currentRelay) {
+      _currentRelay = null;
+      _currentRelayScore = 0;
+      triggerElection();
+    }
+  }
+
   /// 手动触发选举
   void triggerElection() {
     _currentEpoch++;
+    _currentRelay = null;
+    _currentRelayScore = 0;
     _updateState(AutoCoordinatorState.electing);
-    _broadcastClaim();
+    _startElection(); // 启动选举（包含定时器）
   }
 
   /// 注入 SFU RTP 包
@@ -356,16 +394,65 @@ class AutoCoordinator {
     _signalingSubscription = signaling.messages.listen(_handleSignalingMessage);
 
     // 监听 Go 层事件
-    _eventSubscription = EventHandler.events
-        .where((e) => e.roomId == roomId)
-        .listen(_handleSfuEvent);
+    // 监听 Go 层事件（心跳事件可能没有 roomId，所以要单独处理）
+    _eventSubscription = EventHandler.events.listen((event) {
+      // 心跳事件（peerOffline/ping）需要特殊处理
+      if (event.type == SfuEventType.peerOffline ||
+          event.type == SfuEventType.ping) {
+        _handleSfuEvent(event);
+        return;
+      }
+      // 其他事件需要匹配 roomId
+      if (event.roomId == roomId) {
+        _handleSfuEvent(event);
+      }
+    });
 
     // 监听 Ping 请求
     _pingSubscription = PingHandler.pingRequests.listen(_handlePingRequest);
+
+    // 监听 Peer 断开事件（自动检测 Relay 故障，无需客户端额外操作）
+    _peerDisconnectedSubscription = signaling.peerDisconnected.listen((peerId) {
+      notifyPeerDisconnected(peerId);
+    });
+
+    // 监听 Peer 连接事件（比 signaling join 消息更快）
+    // 如果我们是 Relay，立即发送 relayChanged，避免新 Peer 错误地自选举
+    _peerConnectedSubscription = signaling.peerConnected.listen((peerId) {
+      if (peerId != localPeerId && _currentRelay == localPeerId) {
+        signaling.sendRelayChanged(
+          roomId,
+          localPeerId,
+          _currentEpoch,
+          _localScore,
+        );
+      }
+    });
   }
 
   void _handleSignalingMessage(SignalingMessage message) {
     if (message.peerId == localPeerId) return;
+
+    // 自动检测未知 Peer（修复 join 消息可能丢失的竞争条件）
+    // 当收到任何消息时，如果发送者不在 peers 列表中，添加它
+    if (!_peers.contains(message.peerId) &&
+        message.type != SignalingMessageType.leave) {
+      _peers.add(message.peerId);
+      _peerJoinedController.add(message.peerId);
+
+      // 添加到心跳检测
+      _keepalive?.addPeer(message.peerId);
+
+      // 如果我们是 Relay，立即告诉新 Peer
+      if (_currentRelay == localPeerId) {
+        signaling.sendRelayChanged(
+          roomId,
+          localPeerId,
+          _currentEpoch,
+          _localScore,
+        );
+      }
+    }
 
     switch (message.type) {
       case SignalingMessageType.join:
@@ -376,8 +463,14 @@ class AutoCoordinator {
         _handlePeerLeft(message.peerId);
         break;
 
+      case SignalingMessageType.ping:
+        // 收到 ping，回复 pong
+        signaling.sendPong(roomId, message.peerId);
+        break;
+
       case SignalingMessageType.pong:
         _coordinator.handlePong(message.peerId);
+        _keepalive?.handlePong(message.peerId); // 通知心跳管理器
         break;
 
       case SignalingMessageType.relayClaim:
@@ -394,7 +487,12 @@ class AutoCoordinator {
   }
 
   void _handlePeerJoined(String peerId, Map<String, dynamic>? data) {
-    _peers.add(peerId);
+    // 如果 peer 已经存在（通过 auto-detect 添加），只更新设备信息
+    final isNewPeer = !_peers.contains(peerId);
+
+    if (isNewPeer) {
+      _peers.add(peerId);
+    }
 
     final deviceType = DeviceType.values.firstWhere(
       (e) => e.value == (data?['deviceType'] ?? 0),
@@ -416,17 +514,32 @@ class AutoCoordinator {
       powerState: powerState,
     );
 
-    _peerJoinedController.add(peerId);
+    // 只有新 Peer 才触发事件和发送消息
+    if (isNewPeer) {
+      _peerJoinedController.add(peerId);
 
-    // 新 Peer 加入，发送我们的 claim
-    if (config.autoElection && _currentRelay == null) {
-      _broadcastClaim();
+      // 新 Peer 加入时的处理
+      if (config.autoElection) {
+        if (_currentRelay == localPeerId) {
+          // 我们是 Relay - 直接告诉新 Peer
+          signaling.sendRelayChanged(
+            roomId,
+            localPeerId,
+            _currentEpoch,
+            _localScore,
+          );
+        } else if (_currentRelay == null) {
+          // 还没有 Relay - 广播我们的 claim
+          _broadcastClaim();
+        }
+      }
     }
   }
 
   void _handlePeerLeft(String peerId) {
     _peers.remove(peerId);
     _coordinator.removePeer(peerId);
+    _keepalive?.removePeer(peerId); // 从心跳检测移除
     _peerLeftController.add(peerId);
 
     // 如果是 Relay 离开，触发重新选举
@@ -451,20 +564,50 @@ class AutoCoordinator {
     // 告知 Go 层
     _coordinator.receiveClaim(peerId, epoch, score);
 
-    // 冲突解决：比较分数
+    // 已经有稳定的 Relay，不参与选举
+    if (_currentRelay != null) {
+      // 如果我们是 Relay，告知 claimer 当前 Relay 信息
+      if (_currentRelay == localPeerId) {
+        signaling.sendRelayChanged(
+          roomId,
+          localPeerId,
+          _currentEpoch,
+          _localScore,
+        );
+      }
+      // 否则忽略 claim（让 claimer 从 Relay 那里获取信息）
+      return;
+    }
+
+    // 没有 Relay，进行选举冲突解决
     _resolveElection(peerId, epoch, score);
   }
 
   void _resolveElection(String claimerId, int epoch, double claimerScore) {
-    // 对方分数更高
+    // 如果已经有 Relay，需要比较 claimer 和当前 Relay 的分数
+    if (_currentRelay != null && _currentRelay != localPeerId) {
+      // 当前 Relay 不是我，比较 claimer 和当前 Relay
+      if (claimerScore > _currentRelayScore) {
+        // claimer 分数比当前 Relay 高，接受 claimer
+        _acceptRelay(claimerId, epoch, claimerScore);
+      } else if (claimerScore == _currentRelayScore &&
+          claimerId.compareTo(_currentRelay!) > 0) {
+        // 分数相同，比较 PeerId
+        _acceptRelay(claimerId, epoch, claimerScore);
+      }
+      // 否则保持当前 Relay
+      return;
+    }
+
+    // 当前 Relay 是我或没有 Relay，比较 claimer 和我的分数
     if (claimerScore > _localScore) {
-      _acceptRelay(claimerId, epoch);
+      _acceptRelay(claimerId, epoch, claimerScore);
       return;
     }
 
     // 分数相同，比较 PeerId
     if (claimerScore == _localScore && claimerId.compareTo(localPeerId) > 0) {
-      _acceptRelay(claimerId, epoch);
+      _acceptRelay(claimerId, epoch, claimerScore);
       return;
     }
 
@@ -474,14 +617,17 @@ class AutoCoordinator {
     }
   }
 
-  void _acceptRelay(String relayId, int epoch) {
+  void _acceptRelay(String relayId, int epoch, double score) {
     _currentRelay = relayId;
     _currentEpoch = epoch;
+    _currentRelayScore = score;
     _coordinator.setRelay(relayId, epoch);
 
     _electionTimer?.cancel();
 
-    if (_state == AutoCoordinatorState.electing) {
+    // 接受其他 Peer 为 Relay 时，更新状态为 connected
+    // 无论当前是 electing 还是 asRelay，都需要更新
+    if (_state != AutoCoordinatorState.idle) {
       _updateState(AutoCoordinatorState.connected);
     }
 
@@ -490,13 +636,14 @@ class AutoCoordinator {
 
   void _becomeRelay() {
     _currentRelay = localPeerId;
+    _currentRelayScore = _localScore;
     _coordinator.setRelay(localPeerId, _currentEpoch);
 
     _electionTimer?.cancel();
     _updateState(AutoCoordinatorState.asRelay);
 
     // 广播我们成为 Relay
-    signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch);
+    signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch, _localScore);
 
     _relayChangedController.add(localPeerId);
   }
@@ -504,10 +651,34 @@ class AutoCoordinator {
   void _handleRelayChanged(Map<String, dynamic>? data) {
     final relayId = data?['relayId'] as String? ?? '';
     final epoch = data?['epoch'] as int? ?? 0;
+    final score = (data?['score'] as num?)?.toDouble() ?? 0.0;
 
-    if (epoch >= _currentEpoch && relayId.isNotEmpty) {
-      _acceptRelay(relayId, epoch);
+    if (epoch < _currentEpoch || relayId.isEmpty) return;
+
+    // 如果我们当前是 Relay，比较分数决定是否接受
+    if (_currentRelay == localPeerId) {
+      // 对方分数更高，接受
+      if (score > _localScore) {
+        _acceptRelay(relayId, epoch, score);
+        return;
+      }
+      // 分数相同，比较 PeerId（字典序大的优先）
+      if (score == _localScore && relayId.compareTo(localPeerId) > 0) {
+        _acceptRelay(relayId, epoch, score);
+        return;
+      }
+      // 我们分数更高或相同且 PeerId 更大，重新广播我们的 Relay 状态
+      signaling.sendRelayChanged(
+        roomId,
+        localPeerId,
+        _currentEpoch,
+        _localScore,
+      );
+      return;
     }
+
+    // 我们不是 Relay，直接接受
+    _acceptRelay(relayId, epoch, score);
   }
 
   void _handleSfuEvent(SfuEvent event) {
@@ -519,6 +690,16 @@ class AutoCoordinator {
           _currentRelay = null;
           triggerElection();
         }
+        break;
+
+      case SfuEventType.peerOffline:
+        // 心跳超时检测到 Peer 离线
+        notifyPeerDisconnected(event.peerId);
+        break;
+
+      case SfuEventType.ping:
+        // Go 层需要发送 Ping，通过信令发送
+        signaling.sendPing(roomId, event.peerId);
         break;
 
       case SfuEventType.error:

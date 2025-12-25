@@ -118,10 +118,26 @@ abstract class SignalingBridge {
   Future<void> sendRelayClaim(String roomId, int epoch, double score);
 
   /// 发送 Relay 变更通知
-  Future<void> sendRelayChanged(String roomId, String relayId, int epoch);
+  Future<void> sendRelayChanged(
+    String roomId,
+    String relayId,
+    int epoch,
+    double score,
+  );
 
   /// 消息流
   Stream<SignalingMessage> get messages;
+
+  /// Peer 断开连接事件流
+  ///
+  /// 当检测到 Peer 断开连接（如 LiveKit ParticipantDisconnected）时触发
+  Stream<String> get peerDisconnected;
+
+  /// Peer 连接事件流
+  ///
+  /// 当检测到新 Peer 连接（如 LiveKit ParticipantConnected）时触发
+  /// 比 signaling join 消息更快
+  Stream<String> get peerConnected;
 
   /// 释放资源
   void dispose();

@@ -58,7 +58,12 @@ enum SfuEventType {
   peerLeft(2),
   electionResult(3),
   relayChanged(4),
-  error(5);
+  error(5),
+  // 心跳检测事件 (来自 KeepaliveManager)
+  peerOnline(20),
+  peerSlow(21),
+  peerOffline(22),
+  ping(23);
 
   const SfuEventType(this.value);
   final int value;

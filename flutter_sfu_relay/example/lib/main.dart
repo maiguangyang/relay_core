@@ -173,6 +173,7 @@ class _MyAppState extends State<MyApp> {
       _addLog(
         'LiveKit participant disconnected: ${event.participant.identity}',
       );
+      // 断开检测已自动处理，无需手动调用 notifyPeerDisconnected
     });
   }
 
@@ -524,6 +525,7 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
   final String localPeerId;
 
   final _messageController = StreamController<SignalingMessage>.broadcast();
+  final _peerDisconnectedController = StreamController<String>.broadcast();
   bool _isConnected = false;
   String? _currentRoomId;
   lk.EventsListener<lk.RoomEvent>? _listener;
@@ -533,6 +535,14 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     _listener?.on<lk.DataReceivedEvent>((event) {
       _onDataReceived(event.data, event.participant);
     });
+    // 监听 Peer 连接事件（比 signaling 消息更快）
+    _listener?.on<lk.ParticipantConnectedEvent>((event) {
+      _peerConnectedController.add(event.participant.identity);
+    });
+    // 监听 Peer 断开事件，自动通知 AutoCoordinator
+    _listener?.on<lk.ParticipantDisconnectedEvent>((event) {
+      _peerDisconnectedController.add(event.participant.identity);
+    });
   }
 
   @override
@@ -540,6 +550,13 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
 
   @override
   Stream<SignalingMessage> get messages => _messageController.stream;
+
+  @override
+  Stream<String> get peerDisconnected => _peerDisconnectedController.stream;
+
+  final _peerConnectedController = StreamController<String>.broadcast();
+  @override
+  Stream<String> get peerConnected => _peerConnectedController.stream;
 
   @override
   Future<void> connect() async {
@@ -583,11 +600,13 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     String roomId,
     String relayId,
     int epoch,
+    double score,
   ) async {
     await _broadcast({
       'type': 'relayChanged',
       'relayId': relayId,
       'epoch': epoch,
+      'score': score,
     });
   }
 
