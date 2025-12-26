@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
@@ -541,14 +542,25 @@ class _HomePageState extends State<HomePage> {
           );
           await _localParticipant!.publishVideoTrack(track);
         } else if (!kIsWeb && Platform.isIOS) {
-          // iOS: 需要 Broadcast Extension，模拟器不支持
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('iOS 屏幕共享需要在真机上运行，且需配置 Broadcast Extension'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-          return;
+          // iOS: 使用 Broadcast Extension 进行屏幕共享
+          // 检查是否是模拟器，模拟器不支持 ReplayKit 屏幕共享
+          final deviceInfo = DeviceInfoPlugin();
+          final iosInfo = await deviceInfo.iosInfo;
+
+          if (!iosInfo.isPhysicalDevice) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('iOS 模拟器不支持屏幕共享，请使用真机测试'),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
+            return;
+          }
+
+          // 调用后系统会弹出屏幕录制权限对话框
+          await _localParticipant!.setScreenShareEnabled(true);
         } else {
           // Android 和其他平台
           await _localParticipant!.setScreenShareEnabled(true);

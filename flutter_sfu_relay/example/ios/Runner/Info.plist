@@ -49,5 +49,7 @@
 	<string>We use your camera for video conferencing.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We use your microphone for audio conferencing.</string>
+	<key>RTCAppGroupIdentifier</key>
+	<string>group.com.example.flutterSfuRelayExample</string>
 </dict>
 </plist>
