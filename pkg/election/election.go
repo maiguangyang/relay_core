@@ -87,10 +87,22 @@ func (c ConnectionType) Multiplier() float64 {
 	case ConnectionTypeWiFi:
 		return 0.8 // WiFi 稍逊
 	case ConnectionTypeCellular:
-		return 0.3 // 蜂窝网络不适合做 Relay
+		return 0.01 // 蜂窝网络：有效禁止成为 Relay（几乎为 0）
 	default:
 		return 0.5
 	}
+}
+
+// CanBeRelay 判断是否可以成为 Relay
+// 只有具备局域网连接能力的设备才能成为 Relay
+func (c ConnectionType) CanBeRelay() bool {
+	return c == ConnectionTypeEthernet || c == ConnectionTypeWiFi
+}
+
+// IsOnLan 判断是否在局域网上
+// 蜂窝网络不在局域网，不应参与 Relay 系统
+func (c ConnectionType) IsOnLan() bool {
+	return c == ConnectionTypeEthernet || c == ConnectionTypeWiFi
 }
 
 // PowerState 电源状态

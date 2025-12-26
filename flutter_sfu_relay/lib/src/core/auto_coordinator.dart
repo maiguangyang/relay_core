@@ -170,6 +170,18 @@ class AutoCoordinator {
   /// 本机分数
   double get localScore => _localScore;
 
+  /// 本设备是否在局域网上
+  /// 蜂窝网络不在局域网，不应参与 Relay 系统
+  bool get isOnLan =>
+      config.connectionType == ConnectionType.ethernet ||
+      config.connectionType == ConnectionType.wifi;
+
+  /// 本设备是否可以成为 Relay
+  /// 只有 WiFi 或 Ethernet 连接的设备才能成为 Relay
+  bool get canBeRelay =>
+      config.connectionType == ConnectionType.ethernet ||
+      config.connectionType == ConnectionType.wifi;
+
   /// 房间内所有 Peer
   Set<String> get peers => Set.unmodifiable(_peers);
 
@@ -371,7 +383,7 @@ class AutoCoordinator {
         _localScore += 20;
         break;
       case ConnectionType.cellular:
-        _localScore += 5;
+        _localScore -= 100; // 蜂窝网络：有效禁止成为 Relay
         break;
       default:
         break;
@@ -644,10 +656,21 @@ class AutoCoordinator {
   }
 
   void _acceptRelay(String relayId, int epoch, double score) {
-    _currentRelay = relayId;
+    // 蜂窝设备不记录 Relay 信息（它们不在同一局域网，无法使用 Relay）
+    // 但仍然需要更新 epoch 以保持同步
     _currentEpoch = epoch;
-    _currentRelayScore = score;
-    _coordinator.setRelay(relayId, epoch);
+
+    if (isOnLan) {
+      // 只有局域网设备才记录 Relay 信息
+      _currentRelay = relayId;
+      _currentRelayScore = score;
+      _coordinator.setRelay(relayId, epoch);
+      _relayChangedController.add(relayId);
+    } else {
+      // 蜂窝设备：不设置 currentRelay，保持 null
+      _currentRelay = null;
+      _currentRelayScore = 0;
+    }
 
     _electionTimer?.cancel();
 
@@ -656,11 +679,16 @@ class AutoCoordinator {
     if (_state != AutoCoordinatorState.idle) {
       _updateState(AutoCoordinatorState.connected);
     }
-
-    _relayChangedController.add(relayId);
   }
 
   void _becomeRelay() {
+    // 安全检查：只有在局域网上的设备才能成为 Relay
+    if (!isOnLan) {
+      // 蜂窝网络设备不能成为 Relay，直接进入已连接状态
+      _updateState(AutoCoordinatorState.connected);
+      return;
+    }
+
     _currentRelay = localPeerId;
     _currentRelayScore = _localScore;
     _coordinator.setRelay(localPeerId, _currentEpoch);
@@ -766,6 +794,13 @@ class AutoCoordinator {
   void _startElection({bool isInitial = false}) {
     // 如果 Relay 模式已降级，不参与选举
     if (_relayModeDisabled) {
+      _updateState(AutoCoordinatorState.connected);
+      return;
+    }
+
+    // 不在局域网的设备不参与选举（蜂窝网络等）
+    // 这些设备不广播 claim，等待其他有 LAN 的设备成为 Relay
+    if (!isOnLan) {
       _updateState(AutoCoordinatorState.connected);
       return;
     }

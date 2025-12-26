@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
@@ -24,7 +25,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   // 连接配置
   final _urlController = TextEditingController(
-    text: 'ws://192.167.167.129:7880',
+    // text: 'wss://frp.marlon.proton-system.com',
+    text: 'wss://oxygen-sl1zv95n.livekit.cloud',
   );
   final _tokenController = TextEditingController();
 
@@ -43,6 +45,10 @@ class _HomePageState extends State<HomePage> {
   AutoCoordinatorState _relayState = AutoCoordinatorState.idle;
   String? _currentRelay;
   double _localScore = 0;
+
+  // RTP 监控统计
+  Map<String, dynamic> _rtpStats = {};
+  Timer? _statsTimer;
 
   // 参与者列表
   final List<lk.Participant> _participants = [];
@@ -108,6 +114,29 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 检测当前网络连接类型
+  Future<ConnectionType> _detectConnectionType() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      // results 是 List<ConnectivityResult>
+      if (results.contains(ConnectivityResult.ethernet)) {
+        return ConnectionType.ethernet;
+      } else if (results.contains(ConnectivityResult.wifi)) {
+        return ConnectionType.wifi;
+      } else if (results.contains(ConnectivityResult.mobile)) {
+        return ConnectionType.cellular;
+      }
+      return ConnectionType.unknown;
+    } catch (e) {
+      debugPrint('Network detection error: $e');
+      // 桐面默认返回 WiFi（macOS/Windows/Linux）
+      if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+        return ConnectionType.wifi;
+      }
+      return ConnectionType.unknown;
+    }
+  }
+
   // ============================================================
   // 连接逻辑
   // ============================================================
@@ -148,7 +177,11 @@ class _HomePageState extends State<HomePage> {
       // 2. 设置 LiveKit 事件监听
       _setupRoomListeners();
 
-      // 3. 创建信令和 AutoCoordinator
+      // 3. 检测网络类型
+      final connectionType = await _detectConnectionType();
+      debugPrint('[Network] Detected connection type: $connectionType');
+
+      // 4. 创建信令和 AutoCoordinator
       final signaling = _LiveKitSignaling(
         room: _room!,
         localPeerId: _localParticipant!.identity,
@@ -160,7 +193,7 @@ class _HomePageState extends State<HomePage> {
         signaling: signaling,
         config: AutoCoordinatorConfig(
           deviceType: _detectDeviceType(),
-          connectionType: ConnectionType.wifi,
+          connectionType: connectionType, // 使用检测到的网络类型
           powerState: PowerState.pluggedIn,
           autoElection: true,
         ),
@@ -184,6 +217,9 @@ class _HomePageState extends State<HomePage> {
         _localScore = _autoCoord!.localScore;
         _updateParticipants();
       });
+
+      // 启动 RTP 统计监控
+      _startStatsMonitor();
 
       // 默认静音，用户可点击麦克风按钮开启
     } catch (e) {
@@ -288,6 +324,36 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// 启动 RTP 统计监控
+  void _startStatsMonitor() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_autoCoord != null && mounted) {
+        final status = _autoCoord!.getStatus();
+        if (mounted) {
+          setState(() {
+            _rtpStats = status;
+          });
+        }
+        // 打印到控制台供调试
+        final sfuPackets = status['sfu_packets'] ?? 0;
+        final localPackets = status['local_packets'] ?? 0;
+        final isRelay = _autoCoord?.isRelay ?? false;
+        if (isRelay || sfuPackets > 0 || localPackets > 0) {
+          debugPrint(
+            '[RTP Stats] isRelay: $isRelay, SFU: $sfuPackets, Local: $localPackets',
+          );
+        }
+      }
+    });
+  }
+
+  /// 停止 RTP 统计监控
+  void _stopStatsMonitor() {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+  }
+
   DeviceType _detectDeviceType() {
     if (kIsWeb) return DeviceType.pc;
     if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
@@ -300,6 +366,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _disconnect() async {
+    // 停止统计监控
+    _stopStatsMonitor();
+
     await _autoCoord?.stop();
     _autoCoord?.dispose();
     _autoCoord = null;
@@ -828,6 +897,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildStatusBar() {
+    final isRelay = _autoCoord?.isRelay ?? false;
+    final sfuPackets = _rtpStats['sfu_packets'] ?? 0;
+    final localPackets = _rtpStats['local_packets'] ?? 0;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
@@ -851,6 +924,29 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+          // RTP 统计 (仅 Relay 显示)
+          if (isRelay) ...[
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.withOpacity(0.5)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sync_alt, size: 14, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    'SFU:$sfuPackets L:$localPackets',
+                    style: const TextStyle(color: Colors.green, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const Spacer(),
           Text(
             '分数: ${_localScore.toInt()}',
