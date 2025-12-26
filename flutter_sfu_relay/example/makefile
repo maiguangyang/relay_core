@@ -1,5 +1,5 @@
 projectName = "flutter_sfu_relay"
-macAppName = "Flutter Sfu Relay"
+macAppName = "flutter_sfu_relay_example"
 defaultVersion = "1.0.0"
 env = "dev"
 
@@ -60,7 +60,7 @@ mac:
 	@$(FLUTTER) build macos --release --build-name=$(combined_variable) --build-number=$(buildNumber) --split-debug-info=build/symbols && make dmg
 
 dmg:
-	rm -rf "$(dirPath)/$(macAppName).dmg" && hdiutil create -size 100m -fs APFS -volname "$(macAppName)" -attach "$(dirPath)/$(macAppName).dmg" && make copy && make ln && make quit && make format
+	rm -rf "$(dirPath)/$(macAppName).dmg" && hdiutil create -size 300m -fs APFS -volname "$(macAppName)" -attach "$(dirPath)/$(macAppName).dmg" && make copy && make ln && make quit && make format
 
 copy:
 	cp -R "$(dirPath)/$(macAppName).app" "/Volumes/$(macAppName)/" && sleep 2;
