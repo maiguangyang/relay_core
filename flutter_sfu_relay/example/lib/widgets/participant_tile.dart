@@ -31,7 +31,6 @@ class ParticipantTile extends StatefulWidget {
 class _ParticipantTileState extends State<ParticipantTile>
     with SingleTickerProviderStateMixin {
   bool _isSpeaking = false;
-  double _audioLevel = 0.0;
   lk.EventsListener<lk.ParticipantEvent>? _listener;
   Timer? _speakingTimer;
 
@@ -76,30 +75,12 @@ class _ParticipantTileState extends State<ParticipantTile>
   void _checkAudioLevel() {
     if (!mounted) return;
 
-    // 获取音频轨道的音量级别
-    final audioTracks = widget.participant.audioTrackPublications;
-    double maxLevel = 0.0;
-
-    for (final pub in audioTracks) {
-      if (pub.track != null && !pub.muted) {
-        // 本地参与者使用 localTrack 的音量
-        if (widget.isLocal && pub.track is lk.LocalAudioTrack) {
-          // LocalAudioTrack 可以获取当前音量
-          maxLevel = 0.3; // 简化处理，开启麦克风就认为可能在说话
-        } else if (pub.track is lk.RemoteAudioTrack) {
-          // 远程音频轨道
-          maxLevel = 0.3;
-        }
-      }
-    }
-
-    // 使用 isSpeaking 状态（如果有的话）
+    // 使用 isSpeaking 状态
     final isSpeaking = widget.participant.isSpeaking;
 
-    if (mounted) {
+    if (_isSpeaking != isSpeaking) {
       setState(() {
         _isSpeaking = isSpeaking;
-        _audioLevel = maxLevel;
       });
     }
   }
