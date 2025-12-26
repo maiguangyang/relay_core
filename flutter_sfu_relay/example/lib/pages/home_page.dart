@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -24,6 +25,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static const platform = MethodChannel(
+    'com.example.flutterSfuRelay/broadcast_picker',
+  );
+
   // 连接配置
   final _urlController = TextEditingController(
     // text: 'wss://frp.marlon.proton-system.com',
@@ -565,6 +570,12 @@ class _HomePageState extends State<HomePage> {
           }
 
           // 调用后系统会弹出屏幕录制权限对话框
+          // 在 iOS 上，必须手动弹出 ReplayKit Picker
+          try {
+            await platform.invokeMethod('launchBroadcastPicker');
+          } catch (e) {
+            debugPrint('Failed to launch broadcast picker: $e');
+          }
           await _localParticipant!.setScreenShareEnabled(true);
         } else {
           // Android 和其他平台

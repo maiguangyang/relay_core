@@ -109,7 +109,21 @@ class SampleHandler: RPBroadcastSampleHandler {
             return ""
         }
         
-        // flutter_webrtc / LiveKit 约定的 socket 文件名
+        // 动态查找 rtc_ 开头的 socket 文件
+        //flutter_webrtc 可能使用 rtc_AppGroupIdentifier 或者其他变体
+        do {
+            let files = try FileManager.default.contentsOfDirectory(atPath: sharedContainer.path)
+            for file in files {
+                if file.hasPrefix("rtc_") {
+                    os_log(.debug, log: broadcastLogger, "Found rtc socket file: %@", file)
+                    return sharedContainer.appendingPathComponent(file).path
+                }
+            }
+        } catch {
+            os_log(.error, log: broadcastLogger, "Failed to list directory: %@", error.localizedDescription)
+        }
+
+        os_log(.debug, log: broadcastLogger, "No rtc_ file found, defaulting to rtc_AppGroupIdentifier")
         return sharedContainer.appendingPathComponent("rtc_AppGroupIdentifier").path
     }
 }
