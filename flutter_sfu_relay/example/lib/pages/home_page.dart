@@ -29,6 +29,12 @@ class _HomePageState extends State<HomePage> {
     text: 'wss://oxygen-sl1zv95n.livekit.cloud',
   );
   final _tokenController = TextEditingController();
+  // 影子连接专用：Bot Token (identity: "relay-bot", hidden: true, canSubscribe: true)
+  final _botTokenController = TextEditingController(
+    // 测试用写死的 Bot Token
+    text:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
+  );
 
   // 页面状态
   bool _isInMeeting = false;
@@ -77,6 +83,7 @@ class _HomePageState extends State<HomePage> {
     _disconnect();
     _urlController.dispose();
     _tokenController.dispose();
+    _botTokenController.dispose();
     EventHandler.dispose();
     LogHandler.dispose();
     PingHandler.dispose();
@@ -171,7 +178,30 @@ class _HomePageState extends State<HomePage> {
       );
       _roomListener = _room!.createListener();
 
-      await _room!.connect(_urlController.text, _tokenController.text);
+      debugPrint('[Connect] Connecting to room...');
+      // 添加重试机制
+      int retryCount = 0;
+      const maxRetries = 3;
+
+      while (true) {
+        try {
+          await _room!.connect(_urlController.text, _tokenController.text);
+          debugPrint('[Connect] Room connected');
+          break; // 连接成功，跳出循环
+        } catch (e) {
+          retryCount++;
+          debugPrint('[Connect] Connection attempt $retryCount failed: $e');
+
+          if (retryCount >= maxRetries) {
+            debugPrint('[Connect] Max retries reached. Giving up.');
+            rethrow; // 超过最大重试次数，抛出异常
+          }
+
+          debugPrint('[Connect] Retrying in ${retryCount * 2} seconds...');
+          await Future.delayed(Duration(seconds: retryCount * 2));
+        }
+      }
+
       _localParticipant = _room!.localParticipant;
 
       // 2. 设置 LiveKit 事件监听
@@ -196,6 +226,17 @@ class _HomePageState extends State<HomePage> {
           connectionType: connectionType, // 使用检测到的网络类型
           powerState: PowerState.pluggedIn,
           autoElection: true,
+          // 影子连接配置
+          livekitUrl: _urlController.text,
+          // 动态获取 Bot Token 的回调（只有当选为 Relay 时才会调用）
+          onRequestBotToken: (roomId) async {
+            // 如果填写了 Bot Token，使用影子连接
+            if (_botTokenController.text.isNotEmpty) {
+              return _botTokenController.text;
+            }
+            // 没有填写则不启动影子连接
+            return null;
+          },
         ),
       );
 
@@ -223,10 +264,13 @@ class _HomePageState extends State<HomePage> {
 
       // 默认静音，用户可点击麦克风按钮开启
     } catch (e) {
+      debugPrint('[Connect] Error: $e');
       setState(() {
         _isConnecting = false;
         _errorMessage = e.toString();
       });
+
+      print("_errorMessage $_errorMessage");
     }
   }
 
@@ -369,14 +413,24 @@ class _HomePageState extends State<HomePage> {
     // 停止统计监控
     _stopStatsMonitor();
 
-    await _autoCoord?.stop();
-    _autoCoord?.dispose();
+    try {
+      // 给 AutoCoordinator 停止一个超时时间，防止蜂窝网下卡死
+      await _autoCoord?.stop().timeout(const Duration(seconds: 2));
+      _autoCoord?.dispose();
+    } catch (e) {
+      debugPrint('Error stopping AutoCoordinator: $e');
+    }
     _autoCoord = null;
 
     _roomListener?.dispose();
     _roomListener = null;
 
-    await _room?.disconnect();
+    try {
+      // 同样给 disconnect 一个超时时间
+      await _room?.disconnect().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('Error disconnecting room: $e');
+    }
     _room = null;
     _localParticipant = null;
 
@@ -387,6 +441,7 @@ class _HomePageState extends State<HomePage> {
         _currentRelay = null;
         _participants.clear();
         _controlState = const ControlState();
+        _errorMessage = null; // 清除错误信息
       });
     }
   }
@@ -540,26 +595,29 @@ class _HomePageState extends State<HomePage> {
   // -------------------- 登录视图 --------------------
 
   Widget _buildLoginView() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Spacer(flex: 2),
-          _buildHeader(),
-          const SizedBox(height: 48),
-          _buildConnectionForm(),
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              style: const TextStyle(color: AppTheme.accentColor),
-              textAlign: TextAlign.center,
-            ),
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 48), // Top padding
+            _buildHeader(),
+            const SizedBox(height: 48),
+            _buildConnectionForm(),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                style: const TextStyle(color: AppTheme.accentColor),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: 48), // Bottom padding before footer
+            _buildFooter(),
+            const SizedBox(height: 24), // Extra bottom padding
           ],
-          const Spacer(flex: 3),
-          _buildFooter(),
-        ],
+        ),
       ),
     );
   }
@@ -628,6 +686,18 @@ class _HomePageState extends State<HomePage> {
               labelText: 'Token',
               hintText: '输入访问令牌',
               prefixIcon: Icon(Icons.vpn_key, color: AppTheme.textSecondary),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 影子连接模式：独立 Bot Token (可选)
+          TextField(
+            controller: _botTokenController,
+            style: const TextStyle(color: AppTheme.textPrimary),
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Bot Token (可选)',
+              hintText: '影子连接：hidden=true, canSubscribe=true',
+              prefixIcon: Icon(Icons.smart_toy, color: AppTheme.textSecondary),
             ),
           ),
           const SizedBox(height: 24),
@@ -1207,7 +1277,7 @@ class _HomePageState extends State<HomePage> {
     if (parts.length >= 2) {
       return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     }
-    return name.substring(0, name.length.clamp(0, 2)).toUpperCase();
+    return name.substring(0, name.length.clamp(0, 1)).toUpperCase();
   }
 
   /// 特刊布局：屏幕共享者放大显示

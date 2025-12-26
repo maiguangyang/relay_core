@@ -436,7 +436,19 @@ func (pmc *ProxyModeCoordinator) GetStatus() map[string]interface{} {
 	}
 
 	if pmc.switcher != nil {
-		status["source_switcher"] = pmc.switcher.GetStatus()
+		// 获取 SourceSwitcher 状态并放到顶层
+		ssStatus := pmc.switcher.GetStatus()
+		status["source_switcher"] = ssStatus
+		// 同时也放到顶层，方便 Dart 直接访问
+		status["sfu_packets"] = ssStatus.SFUPackets
+		status["local_packets"] = ssStatus.LocalPackets
+		status["active_source"] = ssStatus.ActiveSource
+		status["sfu_active"] = ssStatus.SFUActive
+		status["local_active"] = ssStatus.LocalActive
+	} else {
+		// 如果没有 SourceSwitcher，返回默认值
+		status["sfu_packets"] = uint64(0)
+		status["local_packets"] = uint64(0)
 	}
 
 	return status

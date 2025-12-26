@@ -174,7 +174,17 @@ func SourceSwitcherStopLocalShare(roomID *C.char) C.int {
 func SourceSwitcherGetStatus(roomID *C.char) *C.char {
 	goRoomID := C.GoString(roomID)
 
-	ss := getSourceSwitcher(goRoomID)
+	// 首先尝试从 Coordinator 获取（与 LiveKitBridge 使用相同的实例）
+	var ss *sfu.SourceSwitcher
+	if coord := getCoordinator(goRoomID); coord != nil {
+		ss = coord.GetSourceSwitcher()
+	}
+
+	// 如果没有 Coordinator，尝试独立的 SourceSwitcher
+	if ss == nil {
+		ss = getSourceSwitcher(goRoomID)
+	}
+
 	if ss == nil {
 		return nil
 	}

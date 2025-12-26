@@ -15,6 +15,10 @@ import 'coordinator.dart';
 
 import 'package:ffi/ffi.dart';
 
+/// Bot Token 请求回调类型
+/// 当设备当选为 Relay 时调用，返回 Bot Token 用于影子连接
+typedef BotTokenCallback = Future<String?> Function(String roomId);
+
 /// 自动协调器配置
 class AutoCoordinatorConfig {
   /// 设备类型
@@ -35,6 +39,14 @@ class AutoCoordinatorConfig {
   /// 最大选举失败次数，超过后降级到直连 SFU 模式
   final int maxElectionFailures;
 
+  /// LiveKit URL (Relay 模式专用，Go 层直连 SFU)
+  final String? livekitUrl;
+
+  /// 动态获取 Bot Token 的回调
+  /// 只有当设备当选为 Relay 时才会调用
+  /// 返回 null 表示不启动影子连接
+  final BotTokenCallback? onRequestBotToken;
+
   const AutoCoordinatorConfig({
     this.deviceType = DeviceType.unknown,
     this.connectionType = ConnectionType.unknown,
@@ -42,6 +54,8 @@ class AutoCoordinatorConfig {
     this.electionTimeoutMs = 1000, // 1秒选举超时
     this.autoElection = true,
     this.maxElectionFailures = 3, // 连续3次失败后降级
+    this.livekitUrl,
+    this.onRequestBotToken,
   });
 }
 
@@ -260,6 +274,11 @@ class AutoCoordinator {
     _keepalive?.stop();
     _keepalive?.destroy();
     _keepalive = null;
+
+    // 如果是 Relay，断开 Go 层 LiveKit 连接
+    if (isRelay) {
+      _disconnectLiveKitBridge();
+    }
 
     _coordinator.disable();
 
@@ -696,10 +715,62 @@ class AutoCoordinator {
     _electionTimer?.cancel();
     _updateState(AutoCoordinatorState.asRelay);
 
+    // 启动 Go 层 LiveKit 桥接（如果配置了 URL 和 Token）
+    _connectLiveKitBridge();
+
     // 广播我们成为 Relay
     signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch, _localScore);
 
     _relayChangedController.add(localPeerId);
+  }
+
+  /// 连接 Go 层 LiveKit 桥接器（影子连接）
+  /// 只有当设备当选为 Relay 时才会调用
+  Future<void> _connectLiveKitBridge() async {
+    // 检查是否配置了 URL 和回调
+    if (config.livekitUrl == null || config.onRequestBotToken == null) {
+      // 没有配置影子连接，跳过
+      return;
+    }
+
+    try {
+      // 动态请求 Bot Token
+      final botToken = await config.onRequestBotToken!(roomId);
+      if (botToken == null || botToken.isEmpty) {
+        // 回调返回空，不启动影子连接
+        return;
+      }
+
+      final roomPtr = toCString(roomId);
+      final urlPtr = toCString(config.livekitUrl!);
+      final tokenPtr = toCString(botToken);
+
+      try {
+        // 创建桥接器
+        bindings.LiveKitBridgeCreate(roomPtr);
+        // 连接到 LiveKit SFU
+        bindings.LiveKitBridgeConnect(roomPtr, urlPtr, tokenPtr);
+      } finally {
+        calloc.free(roomPtr);
+        calloc.free(urlPtr);
+        calloc.free(tokenPtr);
+      }
+    } catch (e) {
+      // 影子连接失败不应阻塞主流程，只记录错误
+      // ignore: avoid_print
+      print('[AutoCoordinator] 影子连接启动失败: $e');
+    }
+  }
+
+  /// 断开 Go 层 LiveKit 桥接器
+  void _disconnectLiveKitBridge() {
+    final roomPtr = toCString(roomId);
+    try {
+      bindings.LiveKitBridgeDisconnect(roomPtr);
+      bindings.LiveKitBridgeDestroy(roomPtr);
+    } finally {
+      calloc.free(roomPtr);
+    }
   }
 
   void _handleRelayChanged(Map<String, dynamic>? data) {

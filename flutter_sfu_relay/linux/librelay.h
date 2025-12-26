@@ -60,6 +60,12 @@ static void callPingCallback(const char* peerID) {
 
 #line 1 "cgo-generated-wrapper"
 
+#line 12 "livekit_bridge_ffi.go"
+
+#include <stdlib.h>
+
+#line 1 "cgo-generated-wrapper"
+
 #line 15 "main.go"
 
 #include <stdlib.h>
@@ -287,6 +293,36 @@ extern int CodecIsVideo(char* codecType);
 // CodecIsAudio 判断是否是音频编解码器
 //
 extern int CodecIsAudio(char* codecType);
+
+// LiveKitBridgeCreate 创建 LiveKit 桥接器
+// 返回: 0 成功, -1 失败
+//
+extern int LiveKitBridgeCreate(char* roomID);
+
+// LiveKitBridgeConnect 连接到 LiveKit 房间
+// 返回: 0 成功, -1 失败
+//
+extern int LiveKitBridgeConnect(char* roomID, char* url, char* token);
+
+// LiveKitBridgeDisconnect 断开 LiveKit 连接
+// 返回: 0 成功, -1 失败
+//
+extern int LiveKitBridgeDisconnect(char* roomID);
+
+// LiveKitBridgeDestroy 销毁 LiveKit 桥接器
+// 返回: 0 成功
+//
+extern int LiveKitBridgeDestroy(char* roomID);
+
+// LiveKitBridgeGetStatus 获取桥接器状态
+// 返回: JSON 字符串，需要调用 FreeString 释放
+//
+extern char* LiveKitBridgeGetStatus(char* roomID);
+
+// LiveKitBridgeIsConnected 检查是否已连接
+// 返回: 1 已连接, 0 未连接
+//
+extern int LiveKitBridgeIsConnected(char* roomID);
 extern int ElectionEnable(int64_t relayID, char* roomID);
 extern int ElectionDisable(int64_t relayID, char* roomID);
 extern int ElectionUpdateCandidate(int64_t relayID, char* roomID, char* peerID, int64_t bandwidth, int64_t latency, double packetLoss);

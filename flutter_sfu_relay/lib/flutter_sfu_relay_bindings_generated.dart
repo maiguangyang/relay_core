@@ -50,6 +50,12 @@ class FlutterSfuRelayBindings {
   late final __GoStringPtr = __GoStringPtrPtr
       .asFunction<ffi.Pointer<ffi.Char> Function(_GoString_)>();
 
+  /// Mutex for thread-safe ping callback access
+  late final ffi.Pointer<pthread_mutex_t> _pingCallbackMutex =
+      _lookup<pthread_mutex_t>('pingCallbackMutex');
+
+  pthread_mutex_t get pingCallbackMutex => _pingCallbackMutex.ref;
+
   /// 存储 ping 回调
   late final ffi.Pointer<PingCallback> _pingCallback = _lookup<PingCallback>(
     'pingCallback',
@@ -70,6 +76,17 @@ class FlutterSfuRelayBindings {
   late final _setPingCallback = _setPingCallbackPtr
       .asFunction<void Function(PingCallback)>();
 
+  void invalidatePingCallback() {
+    return _invalidatePingCallback();
+  }
+
+  late final _invalidatePingCallbackPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function()>>(
+        'invalidatePingCallback',
+      );
+  late final _invalidatePingCallback = _invalidatePingCallbackPtr
+      .asFunction<void Function()>();
+
   void callPingCallback(ffi.Pointer<ffi.Char> peerID) {
     return _callPingCallback(peerID);
   }
@@ -80,6 +97,22 @@ class FlutterSfuRelayBindings {
       );
   late final _callPingCallback = _callPingCallbackPtr
       .asFunction<void Function(ffi.Pointer<ffi.Char>)>();
+
+  /// Generation counter for detecting stale callbacks
+  /// Incremented each time callbacks are set or cleared
+  late final ffi.Pointer<ffi.Int64> _callbackGeneration = _lookup<ffi.Int64>(
+    'callbackGeneration',
+  );
+
+  int get callbackGeneration => _callbackGeneration.value;
+
+  set callbackGeneration(int value) => _callbackGeneration.value = value;
+
+  /// Mutex for thread-safe callback access
+  late final ffi.Pointer<pthread_mutex_t> _callbackMutex =
+      _lookup<pthread_mutex_t>('callbackMutex');
+
+  pthread_mutex_t get callbackMutex => _callbackMutex.ref;
 
   /// Store the callbacks
   late final ffi.Pointer<EventCallback> _eventCallback = _lookup<EventCallback>(
@@ -98,7 +131,19 @@ class FlutterSfuRelayBindings {
 
   set logCallback(LogCallback value) => _logCallback.value = value;
 
-  /// Setter functions
+  /// Get current generation (for Go code to check before/after)
+  int getCallbackGeneration() {
+    return _getCallbackGeneration();
+  }
+
+  late final _getCallbackGenerationPtr =
+      _lookup<ffi.NativeFunction<ffi.Int64 Function()>>(
+        'getCallbackGeneration',
+      );
+  late final _getCallbackGeneration = _getCallbackGenerationPtr
+      .asFunction<int Function()>();
+
+  /// Setter functions - increment generation on each change
   void setEventCallback(EventCallback cb) {
     return _setEventCallback(cb);
   }
@@ -121,7 +166,19 @@ class FlutterSfuRelayBindings {
   late final _setLogCallback = _setLogCallbackPtr
       .asFunction<void Function(LogCallback)>();
 
-  /// Caller functions (to be called from Go)
+  /// Invalidate all callbacks and wait for grace period
+  void invalidateAllCallbacks() {
+    return _invalidateAllCallbacks();
+  }
+
+  late final _invalidateAllCallbacksPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function()>>(
+        'invalidateAllCallbacks',
+      );
+  late final _invalidateAllCallbacks = _invalidateAllCallbacksPtr
+      .asFunction<void Function()>();
+
+  /// Caller functions - check if callback is still valid
   void callEventCallback(
     int eventType,
     ffi.Pointer<ffi.Char> roomId,
@@ -435,6 +492,110 @@ class FlutterSfuRelayBindings {
       );
   late final _CodecIsAudio =
       _CodecIsAudioPtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
+
+  /// LiveKitBridgeCreate 创建 LiveKit 桥接器
+  /// 返回: 0 成功, -1 失败
+  int LiveKitBridgeCreate(ffi.Pointer<ffi.Char> roomID) {
+    return _LiveKitBridgeCreate(roomID);
+  }
+
+  late final _LiveKitBridgeCreatePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LiveKitBridgeCreate',
+      );
+  late final _LiveKitBridgeCreate =
+      _LiveKitBridgeCreatePtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
+
+  /// LiveKitBridgeConnect 连接到 LiveKit 房间
+  /// 返回: 0 成功, -1 失败
+  int LiveKitBridgeConnect(
+    ffi.Pointer<ffi.Char> roomID,
+    ffi.Pointer<ffi.Char> url,
+    ffi.Pointer<ffi.Char> token,
+  ) {
+    return _LiveKitBridgeConnect(roomID, url, token);
+  }
+
+  late final _LiveKitBridgeConnectPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Int Function(
+            ffi.Pointer<ffi.Char>,
+            ffi.Pointer<ffi.Char>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('LiveKitBridgeConnect');
+  late final _LiveKitBridgeConnect =
+      _LiveKitBridgeConnectPtr.asFunction<
+        int Function(
+          ffi.Pointer<ffi.Char>,
+          ffi.Pointer<ffi.Char>,
+          ffi.Pointer<ffi.Char>,
+        )
+      >();
+
+  /// LiveKitBridgeDisconnect 断开 LiveKit 连接
+  /// 返回: 0 成功, -1 失败
+  int LiveKitBridgeDisconnect(ffi.Pointer<ffi.Char> roomID) {
+    return _LiveKitBridgeDisconnect(roomID);
+  }
+
+  late final _LiveKitBridgeDisconnectPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LiveKitBridgeDisconnect',
+      );
+  late final _LiveKitBridgeDisconnect =
+      _LiveKitBridgeDisconnectPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LiveKitBridgeDestroy 销毁 LiveKit 桥接器
+  /// 返回: 0 成功
+  int LiveKitBridgeDestroy(ffi.Pointer<ffi.Char> roomID) {
+    return _LiveKitBridgeDestroy(roomID);
+  }
+
+  late final _LiveKitBridgeDestroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LiveKitBridgeDestroy',
+      );
+  late final _LiveKitBridgeDestroy =
+      _LiveKitBridgeDestroyPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LiveKitBridgeGetStatus 获取桥接器状态
+  /// 返回: JSON 字符串，需要调用 FreeString 释放
+  ffi.Pointer<ffi.Char> LiveKitBridgeGetStatus(ffi.Pointer<ffi.Char> roomID) {
+    return _LiveKitBridgeGetStatus(roomID);
+  }
+
+  late final _LiveKitBridgeGetStatusPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)
+        >
+      >('LiveKitBridgeGetStatus');
+  late final _LiveKitBridgeGetStatus =
+      _LiveKitBridgeGetStatusPtr.asFunction<
+        ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LiveKitBridgeIsConnected 检查是否已连接
+  /// 返回: 1 已连接, 0 未连接
+  int LiveKitBridgeIsConnected(ffi.Pointer<ffi.Char> roomID) {
+    return _LiveKitBridgeIsConnected(roomID);
+  }
+
+  late final _LiveKitBridgeIsConnectedPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LiveKitBridgeIsConnected',
+      );
+  late final _LiveKitBridgeIsConnected =
+      _LiveKitBridgeIsConnectedPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
 
   int ElectionEnable(int relayID, ffi.Pointer<ffi.Char> roomID) {
     return _ElectionEnable(relayID, roomID);
@@ -2034,6 +2195,16 @@ final class _GoString_ extends ffi.Struct {
 typedef ptrdiff_t = __darwin_ptrdiff_t;
 typedef __darwin_ptrdiff_t = ffi.Long;
 typedef Dart__darwin_ptrdiff_t = int;
+typedef pthread_mutex_t = __darwin_pthread_mutex_t;
+typedef __darwin_pthread_mutex_t = _opaque_pthread_mutex_t;
+
+final class _opaque_pthread_mutex_t extends ffi.Struct {
+  @ffi.Long()
+  external int __sig;
+
+  @ffi.Array.multi([56])
+  external ffi.Array<ffi.Char> __opaque;
+}
 
 /// Ping 回调函数类型
 typedef PingCallback = ffi.Pointer<ffi.NativeFunction<PingCallbackFunction>>;
