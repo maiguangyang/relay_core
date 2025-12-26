@@ -101,3 +101,7 @@ _StatsGetBitrateOut
 _StatsGetLossRate
 _StatsGetSnapshot
 _StatsGetTraffic
+_LiveKitBridgeCreate
+_LiveKitBridgeConnect
+_LiveKitBridgeDisconnect
+_LiveKitBridgeDestroy

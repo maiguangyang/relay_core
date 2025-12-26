@@ -231,11 +231,16 @@ class _HomePageState extends State<HomePage> {
           livekitUrl: _urlController.text,
           // 动态获取 Bot Token 的回调（只有当选为 Relay 时才会调用）
           onRequestBotToken: (roomId) async {
+            debugPrint(
+              '[ShadowConnection] Requesting Bot Token for room: $roomId',
+            );
             // 如果填写了 Bot Token，使用影子连接
             if (_botTokenController.text.isNotEmpty) {
+              debugPrint('[ShadowConnection] Returning explicit Bot Token');
               return _botTokenController.text;
             }
             // 没有填写则不启动影子连接
+            debugPrint('[ShadowConnection] No Bot Token available');
             return null;
           },
         ),

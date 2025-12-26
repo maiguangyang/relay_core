@@ -746,19 +746,24 @@ class AutoCoordinator {
       final tokenPtr = toCString(botToken);
 
       try {
+        print(
+          '[AutoCoordinator] connecting native bridge to $urlPtr with token length ${botToken.length}',
+        );
         // 创建桥接器
         bindings.LiveKitBridgeCreate(roomPtr);
+        print('[AutoCoordinator] LiveKitBridgeCreate done');
         // 连接到 LiveKit SFU
         bindings.LiveKitBridgeConnect(roomPtr, urlPtr, tokenPtr);
+        print('[AutoCoordinator] LiveKitBridgeConnect done');
       } finally {
         calloc.free(roomPtr);
         calloc.free(urlPtr);
         calloc.free(tokenPtr);
       }
-    } catch (e) {
+    } catch (e, stack) {
       // 影子连接失败不应阻塞主流程，只记录错误
       // ignore: avoid_print
-      print('[AutoCoordinator] 影子连接启动失败: $e');
+      print('[AutoCoordinator] 影子连接启动失败: $e\n$stack');
     }
   }
 
