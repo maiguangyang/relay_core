@@ -44,19 +44,9 @@ electionEnable(0, "room-123".toNativeUtf8());
 
 ### 2. 正常观看（注入 SFU 流）
 
-从 LiveKit 获取 RTP 包后注入：
+**自动处理**：Relay Core 内部通过 **影子连接 (Shadow Connection)** 自动从 LiveKit SFU 拉取 RTP 包并注入。无需在 Dart 层手动处理。
 
-```dart
-// LiveKit Track 回调中
-void onRtpPacket(Uint8List rtpData, bool isVideo) {
-  sourceSwitcherInjectSFU(
-    "room-123".toNativeUtf8(),
-    isVideo ? 1 : 0,
-    rtpData.cast<Void>(),
-    rtpData.length
-  );
-}
-```
+无需任何代码！只要 `AutoCoordinator` 启动并成功连接 LiveKit 桥接，数据就会自动流入。
 
 ### 3. 开始本地分享
 

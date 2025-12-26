@@ -80,14 +80,16 @@ Input A (SFU 流)        Input B (本地分享)
 
 ### 正常观看（SFU 模式）
 
+### 正常观看（SFU 模式）
+
 ```
-LiveKit SFU
+LiveKit SFU (Cloud)
      │
      │ RTP 包
      ▼
-Dart 层 (livekit_client)
+Go 层 (LiveKitBridge - 影子连接)
      │
-     │ InjectSFU()
+     │ InjectSFUPacket()
      ▼
 SourceSwitcher
      │

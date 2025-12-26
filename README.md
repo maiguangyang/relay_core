@@ -18,6 +18,7 @@
 - 🌐 **全平台支持** - Android、iOS、macOS、Windows、Linux
 - 🔌 **Dart FFI 兼容** - C-shared 库导出，完美集成 Flutter
 - 🤖 **一键自动代理** - Coordinator 模式一键启用自动选举和故障切换
+- 👻 **影子连接** - Go 层直接连接 SFU 获取 RTP 包，解决 Flutter SDK 限制
 - 🔄 **无感故障切换** - Relay 故障时自动重选举，用户无感知切换
 - 🗳️ **动态代理选举** - 基于设备类型/网络质量的智能选举
 - 🔀 **代理模式** - 双源切换，本地分享无缝切换
@@ -51,13 +52,24 @@ build/
 
 ### 4. 一键启用自动代理 (推荐)
 
+使用 `AutoCoordinator` 类，自动管理信令、选举和影子连接：
+
 ```dart
-// Dart 使用示例
-coordinatorEnable(roomId, myPeerId);  // 一键启用
-coordinatorUpdateLocalDevice(roomId, DeviceType.PC, ConnectionType.Ethernet, PowerState.PluggedIn);
-coordinatorAddPeer(roomId, peerId, ...);
-// ... 完成后
-coordinatorDisable(roomId);
+final autoCoord = AutoCoordinator(
+  roomId: 'room-1',
+  localPeerId: 'device-A',
+  signaling: mySignaling,
+  config: AutoCoordinatorConfig(
+    autoElection: true,
+    // 影子连接配置
+    livekitUrl: 'wss://your-livekit.com',
+    onRequestBotToken: (roomId) async {
+      return await api.getBotToken(roomId);
+    },
+  ),
+);
+
+await autoCoord.start();
 ```
 
 ## 📖 文档
@@ -67,6 +79,7 @@ coordinatorDisable(roomId);
 | [架构设计](docs/architecture.md) | 整体架构与模块设计 |
 | [API 参考](docs/api-reference.md) | **106 个** FFI 函数完整列表 |
 | [**自动代理模式**](docs/coordinator.md) | **一键启用自动选举和故障切换** |
+| [**影子连接**](docs/shadow-connection.md) | **LiveKit 桥接与 RTP 转发机制** |
 | [Relay P2P 管理](docs/relay-room.md) | RelayRoom 使用教程 |
 | [代理模式](docs/proxy-mode.md) | SourceSwitcher 与双源切换 |
 | [动态选举](docs/election.md) | 设备评分与代理选举 |
@@ -82,6 +95,7 @@ relay_core/
 ├── main.go                  # 核心 FFI 入口
 ├── proxy_mode_ffi.go        # 代理模式 + Coordinator FFI
 ├── relay_room_ffi.go        # Relay 房间 FFI
+├── livekit_bridge_ffi.go    # LiveKit 桥接 FFI (Shadow Connection)
 ├── keepalive_codec_ffi.go   # 心跳/编码 FFI
 ├── stats_probe_ffi.go       # 统计/探测 FFI
 ├── instance.go              # 实例管理
@@ -89,6 +103,7 @@ relay_core/
 │   └── basic/main.go
 └── pkg/sfu/
     ├── coordinator.go       # 一键自动代理协调器
+    ├── livekit_bridge.go    # LiveKit Go 客户端 (Shadow Connection)
     ├── failover.go          # 故障切换 + 冲突解决
     ├── relay_room.go        # Relay P2P 连接管理
     ├── source_switcher.go   # 双源切换器
