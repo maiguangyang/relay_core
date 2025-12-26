@@ -29,22 +29,25 @@ import ReplayKit
   func launchBroadcastPicker() {
       guard let rootController = window?.rootViewController else { return }
       
-      // 创建 Picker，位置不重要，因为我们马上模拟点击
-      // 但为了保险，放在屏幕中间
+      // 创建 Picker
       let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
       picker.showsMicrophoneButton = false
       picker.preferredExtension = "com.example.flutterSfuRelayExample.BroadcastExtension"
-      picker.isHidden = true // 隐藏该控件，只利用它的点击行为
+      picker.isHidden = true
       
       rootController.view.addSubview(picker)
       
       // 遍历查找按钮并触发点击
       for view in picker.subviews {
           if let button = view as? UIButton {
-              button.sendActions(for: .allTouchEvents)
               button.sendActions(for: .touchUpInside)
               break
           }
+      }
+      
+      // 延迟移除 Picker，给系统时间处理点击事件
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+          picker.removeFromSuperview()
       }
   }
 }

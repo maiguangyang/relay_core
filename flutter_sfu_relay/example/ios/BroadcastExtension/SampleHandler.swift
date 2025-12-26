@@ -109,21 +109,33 @@ class SampleHandler: RPBroadcastSampleHandler {
             return ""
         }
         
-        // 动态查找 rtc_ 开头的 socket 文件
-        //flutter_webrtc 可能使用 rtc_AppGroupIdentifier 或者其他变体
-        do {
-            let files = try FileManager.default.contentsOfDirectory(atPath: sharedContainer.path)
-            for file in files {
-                if file.hasPrefix("rtc_") {
-                    os_log(.debug, log: broadcastLogger, "Found rtc socket file: %@", file)
-                    return sharedContainer.appendingPathComponent(file).path
+        os_log(.debug, log: broadcastLogger, "Shared container path: %@", sharedContainer.path)
+        
+        // 重试逻辑：等待 Main App 创建 Socket (最多 3 秒)
+        for attempt in 1...10 {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(atPath: sharedContainer.path)
+                os_log(.debug, log: broadcastLogger, "Attempt %d: Files in container: %@", attempt, files.joined(separator: ", "))
+                
+                for file in files {
+                    if file.hasPrefix("rtc_") {
+                        os_log(.debug, log: broadcastLogger, "Found rtc socket file: %@", file)
+                        return sharedContainer.appendingPathComponent(file).path
+                    }
                 }
+            } catch {
+                os_log(.error, log: broadcastLogger, "Attempt %d: Failed to list directory: %@", attempt, error.localizedDescription)
             }
-        } catch {
-            os_log(.error, log: broadcastLogger, "Failed to list directory: %@", error.localizedDescription)
+            
+            // 等待 300ms 再重试
+            usleep(300000)
         }
 
-        os_log(.debug, log: broadcastLogger, "No rtc_ file found, defaulting to rtc_AppGroupIdentifier")
-        return sharedContainer.appendingPathComponent("rtc_AppGroupIdentifier").path
+        // 最终失败，打印详细信息
+        let fileList = (try? FileManager.default.contentsOfDirectory(atPath: sharedContainer.path).joined(separator: ", ")) ?? "Unavailable"
+        os_log(.error, log: broadcastLogger, "Timeout finding socket after 10 attempts. Files: %@", fileList)
+        
+        // 返回默认值让上层报错
+        return sharedContainer.appendingPathComponent("rtc_SSFD").path
     }
 }

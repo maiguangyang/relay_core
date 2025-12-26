@@ -569,14 +569,44 @@ class _HomePageState extends State<HomePage> {
             return;
           }
 
-          // 调用后系统会弹出屏幕录制权限对话框
-          // 在 iOS 上，必须手动弹出 ReplayKit Picker
+          // 先启动 Socket 创建（不等待完成，让它在后台运行）
+          debugPrint(
+            '[ScreenShare] Starting setScreenShareEnabled with useiOSBroadcastExtension...',
+          );
+          final screenShareFuture = _localParticipant!
+              .setScreenShareEnabled(
+                true,
+                screenShareCaptureOptions: const lk.ScreenShareCaptureOptions(
+                  useiOSBroadcastExtension: true,
+                  maxFrameRate: 15.0,
+                ),
+              )
+              .then((_) {
+                debugPrint(
+                  '[ScreenShare] setScreenShareEnabled completed successfully',
+                );
+              })
+              .catchError((e) {
+                debugPrint('[ScreenShare] setScreenShareEnabled error: $e');
+              });
+
+          // 稍等一下让 Socket 创建完成
+          debugPrint('[ScreenShare] Waiting 500ms for socket creation...');
+          await Future.delayed(const Duration(milliseconds: 500));
+          debugPrint('[ScreenShare] Delay complete, launching picker...');
+
+          // 再弹出 Picker，此时 Socket 应该已经准备好
           try {
             await platform.invokeMethod('launchBroadcastPicker');
+            debugPrint('[ScreenShare] Picker launched successfully');
           } catch (e) {
-            debugPrint('Failed to launch broadcast picker: $e');
+            debugPrint('[ScreenShare] Failed to launch broadcast picker: $e');
           }
-          await _localParticipant!.setScreenShareEnabled(true);
+
+          // 等待屏幕共享完成
+          debugPrint('[ScreenShare] Waiting for screen share to complete...');
+          await screenShareFuture;
+          debugPrint('[ScreenShare] Screen share flow finished');
         } else {
           // Android 和其他平台
           await _localParticipant!.setScreenShareEnabled(true);
