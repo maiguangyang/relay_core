@@ -9,7 +9,6 @@ import '../bindings/bindings.dart';
 import '../bindings/utils.dart';
 import '../callbacks/callbacks.dart';
 import '../enums.dart';
-import '../monitoring/keepalive.dart';
 import '../signaling/signaling.dart';
 import 'coordinator.dart';
 
@@ -135,7 +134,7 @@ class AutoCoordinator {
   double _localScore = 0;
   double _currentRelayScore = 0; // 当前 Relay 的分数
   Timer? _electionTimer;
-  Keepalive? _keepalive; // 心跳管理器
+  // Keepalive? _keepalive; // 心跳管理器
 
   // 选举失败降级机制
   int _electionFailureCount = 0;
@@ -226,10 +225,10 @@ class AutoCoordinator {
       // 2. 启用 Coordinator
       _coordinator.enable();
 
-      // 3. 初始化心跳检测 (1s 间隔, 3s 超时)
-      _keepalive = Keepalive(roomId: roomId);
-      _keepalive!.create(intervalMs: 1000, timeoutMs: 1500); // 1秒心跳, 1.5秒超时
-      _keepalive!.start();
+      // 3. 初始化心跳检测 (Go 层 Coordinator 内部自动管理心跳，无需 Dart 层单独管理)
+      // _keepalive = Keepalive(roomId: roomId);
+      // _keepalive!.create(intervalMs: 1000, timeoutMs: 1500); // 1秒心跳, 1.5秒超时
+      // _keepalive!.start();
 
       // 4. 更新本机设备信息
       _updateLocalDeviceInfo();
@@ -271,9 +270,9 @@ class AutoCoordinator {
     await _peerConnectedSubscription?.cancel();
 
     // 停止心跳检测
-    _keepalive?.stop();
-    _keepalive?.destroy();
-    _keepalive = null;
+    // _keepalive?.stop();
+    // _keepalive?.destroy();
+    // _keepalive = null;
 
     // 如果是 Relay，断开 Go 层 LiveKit 连接
     if (isRelay) {
@@ -485,8 +484,8 @@ class AutoCoordinator {
       _peers.add(message.peerId);
       _peerJoinedController.add(message.peerId);
 
-      // 添加到心跳检测
-      _keepalive?.addPeer(message.peerId);
+      // 添加到心跳检测 (Go 层自动处理)
+      // _keepalive?.addPeer(message.peerId);
 
       // 如果我们是 Relay，立即告诉新 Peer
       if (_currentRelay == localPeerId) {
@@ -515,7 +514,7 @@ class AutoCoordinator {
 
       case SignalingMessageType.pong:
         _coordinator.handlePong(message.peerId);
-        _keepalive?.handlePong(message.peerId); // 通知心跳管理器
+        // _keepalive?.handlePong(message.peerId); // Go 层自动处理
         break;
 
       case SignalingMessageType.relayClaim:
@@ -584,7 +583,8 @@ class AutoCoordinator {
   void _handlePeerLeft(String peerId) {
     _peers.remove(peerId);
     _coordinator.removePeer(peerId);
-    _keepalive?.removePeer(peerId); // 从心跳检测移除
+    _coordinator.removePeer(peerId);
+    // _keepalive?.removePeer(peerId); // Go 层自动处理
     _peerLeftController.add(peerId);
 
     // 如果是 Relay 离开，触发重新选举
@@ -844,6 +844,14 @@ class AutoCoordinator {
         break;
 
       case SfuEventType.peerOffline:
+        // 关键修复：Go 层 Coordinator 有时会通过 EventTypePeerOffline (22)
+        // 发送 action="ping_request" 的数据，这不是真正的离线，而是需要发 Ping
+        // 必须检查 data 字段，否则会导致误判离线，引发 Split Brain
+        if (event.data != null && event.data!.contains('ping_request')) {
+          signaling.sendPing(roomId, event.peerId);
+          return;
+        }
+
         // 心跳超时检测到 Peer 离线
         notifyPeerDisconnected(event.peerId);
         break;
