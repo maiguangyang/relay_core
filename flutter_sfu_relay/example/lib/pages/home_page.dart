@@ -76,10 +76,70 @@ class _HomePageState extends State<HomePage> {
   // 控制状态
   ControlState _controlState = const ControlState();
 
+  // 网络变化监听
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  ConnectionType? _lastConnectionType;
+
   @override
   void initState() {
     super.initState();
     _initSdk();
+    _startConnectivityListener();
+  }
+
+  void _startConnectivityListener() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      results,
+    ) {
+      _handleConnectivityChange(results);
+    });
+  }
+
+  void _handleConnectivityChange(List<ConnectivityResult> results) {
+    // 计算当前网络类型
+    ConnectionType? currentType;
+    if (results.contains(ConnectivityResult.ethernet)) {
+      currentType = ConnectionType.ethernet;
+    } else if (results.contains(ConnectivityResult.wifi)) {
+      currentType = ConnectionType.wifi;
+    } else if (results.contains(ConnectivityResult.mobile)) {
+      currentType = ConnectionType.cellular;
+    }
+
+    // 如果在会议中且网络类型发生变化
+    if (_isInMeeting &&
+        _lastConnectionType != null &&
+        currentType != null &&
+        _lastConnectionType != currentType) {
+      debugPrint(
+        '[Network] Network changed from $_lastConnectionType to $currentType, disconnecting...',
+      );
+      _handleNetworkChange(currentType);
+    }
+
+    _lastConnectionType = currentType;
+  }
+
+  Future<void> _handleNetworkChange(ConnectionType newType) async {
+    // 先断开当前连接
+    await _disconnect();
+
+    // 显示提示
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '网络已切换到 ${newType == ConnectionType.wifi
+                ? "WiFi"
+                : newType == ConnectionType.cellular
+                ? "蜂窝网络"
+                : "以太网"}，请重新加入房间',
+          ),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _initSdk() {
@@ -90,6 +150,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _disconnect();
     _urlController.dispose();
     _tokenController.dispose();
@@ -219,6 +280,7 @@ class _HomePageState extends State<HomePage> {
 
       // 3. 检测网络类型
       final connectionType = await _detectConnectionType();
+      _lastConnectionType = connectionType; // 记录初始网络类型
       debugPrint('[Network] Detected connection type: $connectionType');
 
       // 4. 创建信令和 AutoCoordinator
@@ -443,26 +505,52 @@ class _HomePageState extends State<HomePage> {
     // 停止统计监控
     _stopStatsMonitor();
 
-    try {
-      // 给 AutoCoordinator 停止一个超时时间，防止蜂窝网下卡死
-      await _autoCoord?.stop().timeout(const Duration(seconds: 2));
-      _autoCoord?.dispose();
-    } catch (e) {
-      debugPrint('Error stopping AutoCoordinator: $e');
+    // 1. 先停止 AutoCoordinator（包含信令清理）
+    if (_autoCoord != null) {
+      try {
+        // 给 AutoCoordinator 停止一个超时时间
+        await _autoCoord!.stop().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('Error stopping AutoCoordinator: $e');
+      }
+      // 无论 stop 是否成功，都要 dispose
+      try {
+        _autoCoord!.dispose();
+      } catch (e) {
+        debugPrint('Error disposing AutoCoordinator: $e');
+      }
+      _autoCoord = null;
     }
-    _autoCoord = null;
 
-    _roomListener?.dispose();
-    _roomListener = null;
-
-    try {
-      // 同样给 disconnect 一个超时时间
-      await _room?.disconnect().timeout(const Duration(seconds: 2));
-    } catch (e) {
-      debugPrint('Error disconnecting room: $e');
+    // 2. 清理 Room Listener
+    if (_roomListener != null) {
+      try {
+        _roomListener!.dispose();
+      } catch (e) {
+        debugPrint('Error disposing roomListener: $e');
+      }
+      _roomListener = null;
     }
-    _room = null;
+
+    // 3. 断开并销毁 Room
+    if (_room != null) {
+      try {
+        await _room!.disconnect().timeout(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('Error disconnecting room: $e');
+      }
+      // 完全销毁 Room 对象，确保 Data Channel 等内部状态被清理
+      try {
+        _room!.dispose();
+      } catch (e) {
+        debugPrint('Error disposing room: $e');
+      }
+      _room = null;
+    }
     _localParticipant = null;
+
+    // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
+    await Future.delayed(const Duration(milliseconds: 2000));
 
     if (mounted) {
       setState(() {
@@ -1922,9 +2010,25 @@ class _LiveKitSignaling implements SignalingBridge {
     data['peerId'] = localPeerId;
     data['roomId'] = _currentRoomId;
 
-    await room.localParticipant?.publishData(
-      utf8.encode(jsonEncode(data)),
-      reliable: true,
+    // 在蜂窝网络上，数据通道可能需要更长时间准备
+    // 添加重试机制
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        await room.localParticipant?.publishData(
+          utf8.encode(jsonEncode(data)),
+          reliable: true,
+        );
+        return; // 成功，退出
+      } catch (e) {
+        debugPrint('[Signaling] publishData attempt ${attempt + 1} failed: $e');
+        if (attempt < 2) {
+          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+        }
+      }
+    }
+    // 即使失败也不抛出异常，让会议继续
+    debugPrint(
+      '[Signaling] publishData failed after 3 attempts, continuing...',
     );
   }
 

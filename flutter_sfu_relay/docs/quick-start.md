@@ -60,6 +60,10 @@ class RelayService {
         electionTimeoutMs: 1000,             // 选举超时 (默认 1秒)
         autoElection: true,                  // 自动选举
         maxElectionFailures: 3,              // 连续失败后降级到直连 SFU
+        recoveryDelayMs: 30000,              // 降级后恢复延迟 (默认 30秒)
+        // 可选: 影子连接配置
+        // livekitUrl: 'wss://...',
+        // onRequestBotToken: (roomId) async => await getBotToken(roomId),
       ),
     );
     

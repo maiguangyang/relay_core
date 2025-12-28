@@ -37,6 +37,12 @@ final autoCoord = AutoCoordinator(
     electionTimeoutMs: 1000,             // 选举超时 (重选 1s, 初始 2s)
     autoElection: true,                  // 自动选举
     maxElectionFailures: 3,              // 连续 N 次选举失败后降级为直连 SFU (0=禁用Relay)
+    recoveryDelayMs: 30000,              // 降级后自动恢复延迟 (默认 30秒)
+    // 影子连接配置 (当设备成为 Relay 时连接 LiveKit 云端)
+    livekitUrl: 'wss://your-livekit.com', // LiveKit 服务器 URL
+    onRequestBotToken: (roomId) async {   // 动态获取 Bot Token
+      return await api.getBotToken(roomId);
+    },
   ),
 );
 

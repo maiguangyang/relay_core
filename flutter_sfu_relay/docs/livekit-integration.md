@@ -361,3 +361,108 @@ class _MyAppState extends State<MyApp> {
 | Mobile | 20 | Unknown | 0 | Unknown | 0 |
 
 **最优**: PC + Ethernet + PluggedIn = **100 分**
+
+---
+
+## 网络变化处理
+
+使用 `connectivity_plus` 监听网络变化，当网络切换时自动断开重连：
+
+```dart
+import 'package:connectivity_plus/connectivity_plus.dart';
+
+class LiveKitRelayService {
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  ConnectionType? _lastConnectionType;
+  
+  void startNetworkListener() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
+      final currentType = _getConnectionType(results);
+      
+      // 如果在会议中且网络类型变化
+      if (_isInMeeting && _lastConnectionType != null && currentType != _lastConnectionType) {
+        print('[Network] 网络切换: $_lastConnectionType -> $currentType');
+        _handleNetworkChange(currentType);
+      }
+      
+      _lastConnectionType = currentType;
+    });
+  }
+  
+  void _handleNetworkChange(ConnectionType newType) async {
+    // 断开当前连接，避免 SDK 状态混乱
+    await disconnect();
+    
+    // 显示提示，让用户重新加入
+    showMessage('网络已切换，请重新加入房间');
+  }
+  
+  ConnectionType _getConnectionType(List<ConnectivityResult> results) {
+    if (results.contains(ConnectivityResult.ethernet)) return ConnectionType.ethernet;
+    if (results.contains(ConnectivityResult.wifi)) return ConnectionType.wifi;
+    if (results.contains(ConnectivityResult.mobile)) return ConnectionType.cellular;
+    return ConnectionType.unknown;
+  }
+  
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    // ...
+  }
+}
+```
+
+> ⚠️ **注意**: 网络切换时直接重连可能导致 LiveKit SDK 内部状态异常。
+> 建议先完全断开，等待用户手动重新加入。
+
+---
+
+## 正确的清理流程
+
+退出房间时确保完全清理：
+
+```dart
+Future<void> disconnect() async {
+  // 1. 停止 AutoCoordinator（会断开影子连接）
+  try {
+    await _autoCoord.stop().timeout(Duration(seconds: 2));
+    _autoCoord.dispose();
+  } catch (e) {
+    print('Error stopping AutoCoordinator: $e');
+  }
+  
+  // 2. 断开 LiveKit Room
+  try {
+    await _lkRoom.disconnect().timeout(Duration(seconds: 2));
+    _lkRoom.dispose();
+  } catch (e) {
+    print('Error disconnecting room: $e');
+  }
+  
+  // 3. 等待 SDK 异步清理
+  await Future.delayed(Duration(seconds: 2));
+}
+```
+
+---
+
+## 影子连接（Relay Bot）
+
+当设备成为 Relay 时，可以创建一个 "影子连接" 到 LiveKit 云端：
+
+```dart
+_autoCoord = AutoCoordinator(
+  // ...
+  config: AutoCoordinatorConfig(
+    // ...
+    livekitUrl: 'wss://your-livekit.com',
+    onRequestBotToken: (roomId) async {
+      // 向服务器请求 Bot Token
+      // Bot 的 identity 建议使用: "relay-bot-${relayPeerId}"
+      return await api.getBotToken(roomId, identity: 'relay-bot-$peerId');
+    },
+  ),
+);
+```
+
+影子连接用于将局域网流量同步到云端，其他非局域网设备可以通过 Bot 接收流。
+
