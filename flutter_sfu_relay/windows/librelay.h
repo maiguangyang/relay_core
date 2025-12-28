@@ -12,8 +12,6 @@
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
 typedef struct { const char *p; ptrdiff_t n; } _GoString_;
-extern size_t _GoStringLen(_GoString_ s);
-extern const char *_GoStringPtr(_GoString_ s);
 #endif
 
 #endif
@@ -184,15 +182,9 @@ typedef size_t GoUintptr;
 typedef float GoFloat32;
 typedef double GoFloat64;
 #ifdef _MSC_VER
-#if !defined(__cplusplus) || _MSVC_LANG <= 201402L
 #include <complex.h>
 typedef _Fcomplex GoComplex64;
 typedef _Dcomplex GoComplex128;
-#else
-#include <complex>
-typedef std::complex<float> GoComplex64;
-typedef std::complex<double> GoComplex128;
-#endif
 #else
 typedef float _Complex GoComplex64;
 typedef double _Complex GoComplex128;
@@ -276,11 +268,11 @@ extern __declspec(dllexport) void SetPingCallback(PingCallback callback);
 
 // CodecGetSupportedVideo 获取支持的视频编解码器列表
 //
-extern __declspec(dllexport) char* CodecGetSupportedVideo(void);
+extern __declspec(dllexport) char* CodecGetSupportedVideo();
 
 // CodecGetSupportedAudio 获取支持的音频编解码器列表
 //
-extern __declspec(dllexport) char* CodecGetSupportedAudio(void);
+extern __declspec(dllexport) char* CodecGetSupportedAudio();
 
 // CodecParseType 解析 MimeType 获取编解码器类型
 //
@@ -299,8 +291,9 @@ extern __declspec(dllexport) int CodecIsAudio(char* codecType);
 //
 extern __declspec(dllexport) int LiveKitBridgeCreate(char* roomID);
 
-// LiveKitBridgeConnect 连接到 LiveKit 房间
-// 返回: 0 成功, -1 失败
+// LiveKitBridgeConnect 连接到 LiveKit 房间 (异步)
+// 立即返回，连接在后台进行
+// 返回: 0 成功启动, -1 失败
 //
 extern __declspec(dllexport) int LiveKitBridgeConnect(char* roomID, char* url, char* token);
 
@@ -332,8 +325,8 @@ extern __declspec(dllexport) void SetEventCallback(EventCallback callback);
 extern __declspec(dllexport) void SetLogCallback(LogCallback callback);
 extern __declspec(dllexport) void SetLogLevel(int level);
 extern __declspec(dllexport) void FreeString(char* s);
-extern __declspec(dllexport) void CleanupAll(void);
-extern __declspec(dllexport) char* GetVersion(void);
+extern __declspec(dllexport) void CleanupAll();
+extern __declspec(dllexport) char* GetVersion();
 
 // SourceSwitcherCreate 创建源切换器
 //
@@ -558,11 +551,11 @@ extern __declspec(dllexport) int RelayRoomStopLocalShare(char* roomID);
 
 // BufferPoolGetStats 获取全局缓冲池统计
 //
-extern __declspec(dllexport) char* BufferPoolGetStats(void);
+extern __declspec(dllexport) char* BufferPoolGetStats();
 
 // BufferPoolResetStats 重置缓冲池统计
 //
-extern __declspec(dllexport) void BufferPoolResetStats(void);
+extern __declspec(dllexport) void BufferPoolResetStats();
 
 // StatsCreate 创建房间统计
 //

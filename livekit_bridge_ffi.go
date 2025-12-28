@@ -50,8 +50,9 @@ func LiveKitBridgeCreate(roomID *C.char) C.int {
 	return 0
 }
 
-// LiveKitBridgeConnect 连接到 LiveKit 房间
-// 返回: 0 成功, -1 失败
+// LiveKitBridgeConnect 连接到 LiveKit 房间 (异步)
+// 立即返回，连接在后台进行
+// 返回: 0 成功启动, -1 失败
 //
 //export LiveKitBridgeConnect
 func LiveKitBridgeConnect(roomID, url, token *C.char) C.int {
@@ -64,10 +65,15 @@ func LiveKitBridgeConnect(roomID, url, token *C.char) C.int {
 		return -1
 	}
 
-	err := bridge.Connect(u, t)
-	if err != nil {
-		return -1
-	}
+	// 在 goroutine 中异步连接，不阻塞调用线程
+	go func() {
+		err := bridge.Connect(u, t)
+		if err != nil {
+			// 连接失败，可以通过事件回调通知 Dart
+			// 目前只打印日志
+			println("[LiveKitBridge] Connect failed:", err.Error())
+		}
+	}()
 
 	return 0
 }

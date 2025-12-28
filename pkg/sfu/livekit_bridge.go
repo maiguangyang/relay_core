@@ -227,13 +227,19 @@ func (b *LiveKitBridge) handleDisconnected() {
 // Disconnect 断开连接
 func (b *LiveKitBridge) Disconnect() {
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true // 先标记关闭，让 readRTPLoop 尽快退出
 	room := b.room
 	b.room = nil
 	b.state = LiveKitBridgeStateDisconnected
 	b.mu.Unlock()
 
 	if room != nil {
-		room.Disconnect()
+		// 异步断开，避免阻塞调用线程
+		go room.Disconnect()
 	}
 
 	b.emitStateChanged(LiveKitBridgeStateDisconnected)

@@ -264,6 +264,21 @@ class _HomePageState extends State<HomePage> {
         if (mounted) setState(() => _currentRelay = relayId);
       });
 
+      // 5. 监听 Peer 加入/离开 (比 LiveKit 事件更快)
+      _autoCoord!.onPeerJoined.listen((peerId) {
+        if (mounted) {
+          debugPrint('[Signaling] Peer joined: $peerId');
+          _updateParticipants();
+        }
+      });
+
+      _autoCoord!.onPeerLeft.listen((peerId) {
+        if (mounted) {
+          debugPrint('[Signaling] Peer left: $peerId');
+          _updateParticipants();
+        }
+      });
+
       // 5. 启动
       await _autoCoord!.start();
 
@@ -1349,9 +1364,7 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      isLocal
-                          ? '${participant.identity} (我)'
-                          : participant.identity,
+                      _getDisplayName(participant, isLocal),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
@@ -1538,9 +1551,7 @@ class _HomePageState extends State<HomePage> {
               // 名称
               Flexible(
                 child: Text(
-                  isLocal
-                      ? '${participant.identity} (我)'
-                      : participant.identity,
+                  _getDisplayName(participant, isLocal),
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 12,
@@ -1563,6 +1574,27 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  /// 获取参与者的显示名称
+  /// 对于 relay-bot，显示它属于哪个 Relay 用户
+  String _getDisplayName(lk.Participant participant, bool isLocal) {
+    final identity = participant.identity;
+
+    // 检测是否是 relay-bot
+    if (identity == 'relay-bot' || identity.startsWith('relay-bot')) {
+      if (_currentRelay != null) {
+        return 'Bot (${_currentRelay})';
+      }
+      return 'Bot';
+    }
+
+    // 本地用户
+    if (isLocal) {
+      return '$identity (我)';
+    }
+
+    return identity;
   }
 
   Widget _buildSmallTag(String text, Color color) {

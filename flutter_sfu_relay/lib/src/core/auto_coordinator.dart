@@ -38,6 +38,9 @@ class AutoCoordinatorConfig {
   /// 最大选举失败次数，超过后降级到直连 SFU 模式
   final int maxElectionFailures;
 
+  /// 降级后自动恢复延迟（毫秒），0 表示不自动恢复
+  final int recoveryDelayMs;
+
   /// LiveKit URL (Relay 模式专用，Go 层直连 SFU)
   final String? livekitUrl;
 
@@ -53,6 +56,7 @@ class AutoCoordinatorConfig {
     this.electionTimeoutMs = 1000, // 1秒选举超时
     this.autoElection = true,
     this.maxElectionFailures = 3, // 连续3次失败后降级
+    this.recoveryDelayMs = 30000, // 30秒后自动恢复
     this.livekitUrl,
     this.onRequestBotToken,
   });
@@ -139,6 +143,7 @@ class AutoCoordinator {
   // 选举失败降级机制
   int _electionFailureCount = 0;
   bool _relayModeDisabled = false;
+  Timer? _recoveryTimer;
 
   final Set<String> _peers = {};
 
@@ -222,25 +227,29 @@ class AutoCoordinator {
       LogHandler.init();
       PingHandler.init();
 
-      // 2. 启用 Coordinator
+      // 让 UI 有机会更新
+      await Future.delayed(Duration.zero);
+
+      // 2. 启用 Coordinator (FFI 调用)
       _coordinator.enable();
 
-      // 3. 初始化心跳检测 (Go 层 Coordinator 内部自动管理心跳，无需 Dart 层单独管理)
-      // _keepalive = Keepalive(roomId: roomId);
-      // _keepalive!.create(intervalMs: 1000, timeoutMs: 1500); // 1秒心跳, 1.5秒超时
-      // _keepalive!.start();
+      // 让 UI 有机会更新
+      await Future.delayed(Duration.zero);
 
-      // 4. 更新本机设备信息
+      // 3. 更新本机设备信息
       _updateLocalDeviceInfo();
 
-      // 5. 连接信令
+      // 4. 连接信令
       await signaling.connect();
       await signaling.joinRoom(roomId, localPeerId);
 
-      // 6. 设置所有监听
+      // 5. 设置所有监听
       _setupListeners();
 
-      // 7. 开始选举或直接连接
+      // 让 UI 有机会更新
+      await Future.delayed(Duration.zero);
+
+      // 6. 开始选举或直接连接
       // maxElectionFailures <= 0 表示禁用 Relay 模式，直接走 SFU
       if (config.maxElectionFailures <= 0) {
         _relayModeDisabled = true;
@@ -281,12 +290,18 @@ class AutoCoordinator {
 
     _coordinator.disable();
 
+    // 取消恢复定时器
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
+
     try {
       await signaling.leaveRoom(roomId);
     } catch (_) {}
 
     _peers.clear();
     _currentRelay = null;
+    _electionFailureCount = 0;
+    _relayModeDisabled = false;
     _updateState(AutoCoordinatorState.idle);
   }
 
@@ -671,6 +686,14 @@ class AutoCoordinator {
     // 我们分数更高，保持或成为 Relay
     if (_currentRelay == null) {
       _becomeRelay();
+    } else {
+      // 我们已经是 Relay，广播 relayChanged 告知 claimer
+      signaling.sendRelayChanged(
+        roomId,
+        localPeerId,
+        _currentEpoch,
+        _localScore,
+      );
     }
   }
 
@@ -726,13 +749,19 @@ class AutoCoordinator {
 
   /// 连接 Go 层 LiveKit 桥接器（影子连接）
   /// 只有当设备当选为 Relay 时才会调用
-  Future<void> _connectLiveKitBridge() async {
+  void _connectLiveKitBridge() {
     // 检查是否配置了 URL 和回调
     if (config.livekitUrl == null || config.onRequestBotToken == null) {
       // 没有配置影子连接，跳过
       return;
     }
 
+    // 直接异步执行（Go 层 LiveKitBridgeConnect 已在 goroutine 中运行，不会阻塞）
+    _connectLiveKitBridgeAsync();
+  }
+
+  /// 异步连接 LiveKit 桥接器
+  Future<void> _connectLiveKitBridgeAsync() async {
     try {
       // 动态请求 Bot Token
       final botToken = await config.onRequestBotToken!(roomId);
@@ -752,9 +781,9 @@ class AutoCoordinator {
         // 创建桥接器
         bindings.LiveKitBridgeCreate(roomPtr);
         print('[AutoCoordinator] LiveKitBridgeCreate done');
-        // 连接到 LiveKit SFU
+        // 连接到 LiveKit SFU (Go 层异步执行)
         bindings.LiveKitBridgeConnect(roomPtr, urlPtr, tokenPtr);
-        print('[AutoCoordinator] LiveKitBridgeConnect done');
+        print('[AutoCoordinator] LiveKitBridgeConnect started');
       } finally {
         calloc.free(roomPtr);
         calloc.free(urlPtr);
@@ -925,8 +954,42 @@ class AutoCoordinator {
 
     // 通知应用层已降级
     _errorController.add(
-      'Relay mode disabled after $_electionFailureCount consecutive failures',
+      'Relay mode disabled after $_electionFailureCount consecutive failures, will retry in ${config.recoveryDelayMs}ms',
     );
+
+    // 自动恢复定时器
+    if (config.recoveryDelayMs > 0) {
+      _recoveryTimer?.cancel();
+      _recoveryTimer = Timer(
+        Duration(milliseconds: config.recoveryDelayMs),
+        () {
+          _enableRelayMode();
+        },
+      );
+    }
+  }
+
+  /// 恢复 Relay 模式，重新尝试选举
+  void _enableRelayMode() {
+    if (!_relayModeDisabled) return;
+
+    _relayModeDisabled = false;
+    _electionFailureCount = 0;
+
+    // 如果已经有 Relay 存在，不需要重新选举
+    if (_currentRelay != null) {
+      _errorController.add(
+        'Relay mode re-enabled, existing Relay: $_currentRelay',
+      );
+      return;
+    }
+
+    _errorController.add('Relay mode re-enabled, starting new election');
+
+    // 重新开始选举
+    if (config.autoElection && isOnLan) {
+      _startElection(isInitial: true);
+    }
   }
 
   void _broadcastClaim() {
