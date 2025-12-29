@@ -6,7 +6,7 @@
  * Screen Share Plugin for Windows
  * Implements native floating toolbar and corner borders (matching macOS)
  */
-#include "screen_share_plugin.h"
+#include "include/flutter_sfu_relay/screen_share_plugin.h"
 
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>

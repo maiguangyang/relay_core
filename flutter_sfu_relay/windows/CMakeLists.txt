@@ -15,7 +15,7 @@ set(PREBUILT_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 # Screen Share Plugin 源文件
 set(PLUGIN_SOURCES
   "screen_share_plugin.cpp"
-  "screen_share_plugin.h"
+  "include/flutter_sfu_relay/screen_share_plugin.h"
 )
 
 # 创建插件库
