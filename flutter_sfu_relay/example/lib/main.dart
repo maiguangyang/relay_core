@@ -677,8 +677,9 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     );
   }
 
-  void _onDataReceived(List<int> data, lk.RemoteParticipant? participant) {
-    if (participant == null) return;
+  void _onDataReceived(List<int> data, lk.Participant? participant) {
+    // 忽略来自 LocalParticipant 的数据以及 null 参与者
+    if (participant == null || participant is lk.LocalParticipant) return;
 
     try {
       final json = jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
