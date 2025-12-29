@@ -207,7 +207,6 @@ void ScreenShareOverlay::CreateToolbarWindow() {
 
   // Get screen dimensions
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
   int toolbarWidth = 200;
   int toolbarHeight = 36;
