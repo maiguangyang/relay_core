@@ -9,6 +9,7 @@
 #include "include/flutter_sfu_relay/screen_share_plugin.h"
 
 #include <flutter/method_channel.h>
+#include <flutter/plugin_registrar_manager.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
