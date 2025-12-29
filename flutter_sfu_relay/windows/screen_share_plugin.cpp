@@ -9,7 +9,6 @@
 #include "include/flutter_sfu_relay/screen_share_plugin.h"
 
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_manager.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
@@ -42,9 +41,8 @@ const wchar_t *ScreenShareOverlay::kBorderClassName = L"ScreenShareBorder";
 // static
 void ScreenSharePluginRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
-  flutter_sfu_relay::ScreenSharePlugin::RegisterWithRegistrar(
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
+  auto *plugin_registrar = new flutter::PluginRegistrarWindows(registrar);
+  flutter_sfu_relay::ScreenSharePlugin::RegisterWithRegistrar(plugin_registrar);
 }
 
 // static
