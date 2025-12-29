@@ -29,19 +29,28 @@ final DynamicLibrary dylib = () {
     return DynamicLibrary.open('$_libName.so');
   }
   if (Platform.isWindows) {
-    print('Current Dir: ${Directory.current.path}');
-    if (!File('librelay.dll').existsSync()) {
-      print('librelay.dll NOT found!');
-      try {
-        Directory.current.listSync().forEach(
-          (e) => print('  ${e.path.split(Platform.pathSeparator).last}'),
-        );
-      } catch (e) {
-        print('List failed: $e');
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final libFile = File(
+        '${exeDir.path}${Platform.pathSeparator}librelay.dll',
+      );
+
+      if (libFile.existsSync()) {
+        print('[ScreenShare] Loading librelay.dll from: ${libFile.path}');
+        return DynamicLibrary.open(libFile.path);
+      } else {
+        print('[ScreenShare] librelay.dll NOT found in ${exeDir.path}');
+        print('[ScreenShare] Listing directory contents:');
+        try {
+          exeDir.listSync().forEach((e) {
+            print('  ${e.path.split(Platform.pathSeparator).last}');
+          });
+        } catch (_) {}
       }
-    } else {
-      print('librelay.dll found.');
+    } catch (e) {
+      print('[ScreenShare] Error determining library path: $e');
     }
+    // Fallback
     return DynamicLibrary.open('$_libName.dll');
   }
   throw UnsupportedError('Unknown platform: ${Platform.operatingSystem}');
