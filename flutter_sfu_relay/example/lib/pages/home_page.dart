@@ -124,22 +124,10 @@ class _HomePageState extends State<HomePage> {
     // 先断开当前连接
     await _disconnect();
 
-    // 显示提示
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '网络已切换到 ${newType == ConnectionType.wifi
-                ? "WiFi"
-                : newType == ConnectionType.cellular
-                ? "蜂窝网络"
-                : "以太网"}，请重新加入房间',
-          ),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // 重新连接
+    await _connect();
   }
 
   void _initSdk() {
