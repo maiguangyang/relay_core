@@ -545,19 +545,35 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
   bool _isConnected = false;
   String? _currentRoomId;
   lk.EventsListener<lk.RoomEvent>? _listener;
+  bool _disposed = false; // 防止 dispose 后处理事件
 
   LiveKitDataChannelSignaling({required this.room, required this.localPeerId}) {
     _listener = room.createListener();
     _listener?.on<lk.DataReceivedEvent>((event) {
-      _onDataReceived(event.data, event.participant);
+      if (_disposed) return;
+      try {
+        _onDataReceived(event.data, event.participant);
+      } catch (e) {
+        print('[Signaling] DataReceivedEvent error: $e');
+      }
     });
     // 监听 Peer 连接事件（比 signaling 消息更快）
     _listener?.on<lk.ParticipantConnectedEvent>((event) {
-      _peerConnectedController.add(event.participant.identity);
+      if (_disposed) return;
+      try {
+        _peerConnectedController.add(event.participant.identity);
+      } catch (e) {
+        print('[Signaling] ParticipantConnectedEvent error: $e');
+      }
     });
     // 监听 Peer 断开事件，自动通知 AutoCoordinator
     _listener?.on<lk.ParticipantDisconnectedEvent>((event) {
-      _peerDisconnectedController.add(event.participant.identity);
+      if (_disposed) return;
+      try {
+        _peerDisconnectedController.add(event.participant.identity);
+      } catch (e) {
+        print('[Signaling] ParticipantDisconnectedEvent error: $e');
+      }
     });
   }
 
@@ -663,8 +679,13 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
 
   @override
   void dispose() {
+    // 先设置标志，防止事件处理
+    _disposed = true;
     _listener?.dispose();
+    _listener = null;
     _messageController.close();
+    _peerDisconnectedController.close();
+    _peerConnectedController.close();
   }
 
   Future<void> _broadcast(Map<String, dynamic> data) async {

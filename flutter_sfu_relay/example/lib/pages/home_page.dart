@@ -124,7 +124,7 @@ class _HomePageState extends State<HomePage> {
     // 先断开当前连接
     await _disconnect();
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 1500));
 
     // 重新连接
     await _connect();
@@ -345,12 +345,33 @@ class _HomePageState extends State<HomePage> {
       // 默认静音，用户可点击麦克风按钮开启
     } catch (e) {
       debugPrint('[Connect] Error: $e');
+
+      // 关键修复：如果连接过程中发生错误，必须清理已建立的连接
+      // 否则会产生"幽灵用户" - 服务器端已连接但本地UI显示未连接
+      try {
+        _autoCoord?.dispose();
+        _autoCoord = null;
+      } catch (_) {}
+
+      try {
+        _roomListener?.dispose();
+        _roomListener = null;
+      } catch (_) {}
+
+      try {
+        await _room?.disconnect();
+        _room?.dispose();
+        _room = null;
+      } catch (_) {}
+
+      _localParticipant = null;
+
       setState(() {
         _isConnecting = false;
         _errorMessage = e.toString();
       });
 
-      print("_errorMessage $_errorMessage");
+      debugPrint('[Connect] Cleanup completed after error');
     }
   }
 
@@ -426,7 +447,18 @@ class _HomePageState extends State<HomePage> {
       if (_localParticipant != null) {
         _participants.add(_localParticipant!);
       }
-      _participants.addAll(_room!.remoteParticipants.values);
+
+      // 添加远程参与者，但蜂窝网络用户不显示 relay-bot（影子用户）
+      for (final participant in _room!.remoteParticipants.values) {
+        // 蜂窝网络用户过滤掉 relay-bot
+        // if (_lastConnectionType == ConnectionType.cellular) {
+        final identity = participant.identity;
+        if (identity == 'relay-bot' || identity.startsWith('relay-bot')) {
+          continue; // 跳过 relay-bot
+        }
+        // }
+        _participants.add(participant);
+      }
 
       // 检测屏幕共享参与者
       _screenShareParticipant = null;
@@ -1660,7 +1692,7 @@ class _HomePageState extends State<HomePage> {
     // 检测是否是 relay-bot
     if (identity == 'relay-bot' || identity.startsWith('relay-bot')) {
       if (_currentRelay != null) {
-        return 'Bot (${_currentRelay})';
+        return 'Bot ($_currentRelay)';
       }
       return 'Bot';
     }
@@ -1868,17 +1900,35 @@ class _LiveKitSignaling implements SignalingBridge {
   lk.EventsListener<lk.RoomEvent>? _listener;
   String? _currentRoomId;
   bool _isConnected = false;
+  bool _disposed = false; // 防止 dispose 后处理事件
 
   _LiveKitSignaling({required this.room, required this.localPeerId}) {
     _listener = room.createListener();
     _listener?.on<lk.DataReceivedEvent>((event) {
-      _onDataReceived(event.data, event.participant);
+      // 检查是否已 dispose，防止处理过时事件
+      if (_disposed) return;
+      // 使用 try-catch 防止 LiveKit SDK 内部类型转换错误
+      try {
+        _onDataReceived(event.data, event.participant);
+      } catch (e) {
+        debugPrint('[Signaling] DataReceivedEvent error: $e');
+      }
     });
     _listener?.on<lk.ParticipantConnectedEvent>((event) {
-      _peerConnectedController.add(event.participant.identity);
+      if (_disposed) return;
+      try {
+        _peerConnectedController.add(event.participant.identity);
+      } catch (e) {
+        debugPrint('[Signaling] ParticipantConnectedEvent error: $e');
+      }
     });
     _listener?.on<lk.ParticipantDisconnectedEvent>((event) {
-      _peerDisconnectedController.add(event.participant.identity);
+      if (_disposed) return;
+      try {
+        _peerDisconnectedController.add(event.participant.identity);
+      } catch (e) {
+        debugPrint('[Signaling] ParticipantDisconnectedEvent error: $e');
+      }
     });
   }
 
@@ -1907,7 +1957,10 @@ class _LiveKitSignaling implements SignalingBridge {
 
   @override
   void dispose() {
+    // 先设置标志，防止事件处理
+    _disposed = true;
     _listener?.dispose();
+    _listener = null;
     _messageController.close();
     _peerDisconnectedController.close();
     _peerConnectedController.close();
