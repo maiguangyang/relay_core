@@ -1,9 +1,77 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import '../theme/app_theme.dart';
+
+/// Native screen capture channel for macOS
+/// Note: Self-exclusion is handled by NSWindow.sharingType = .none in Swift
+class ScreenCaptureChannel {
+  static const _channel = MethodChannel('com.example.screencapture');
+
+  // 停止共享回调
+  static VoidCallback? onStopSharingRequested;
+
+  /// 初始化方法调用处理（用于接收原生端的回调）
+  static void initialize() {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onStopSharingRequested') {
+        debugPrint('[ScreenCapture] Stop sharing requested from native UI');
+        onStopSharingRequested?.call();
+      }
+    });
+  }
+
+  /// Check if native self-exclusion is supported
+  static Future<bool> isSupported() async {
+    if (!Platform.isMacOS) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>('isSupported');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('[ScreenCapture] isSupported check failed: $e');
+      return false;
+    }
+  }
+
+  /// Get app's own window IDs (for debugging/reference)
+  static Future<List<int>> getSelfWindowIDs() async {
+    try {
+      final result = await _channel.invokeMethod<List>('getSelfWindowIDs');
+      return result?.cast<int>() ?? [];
+    } catch (e) {
+      debugPrint('[ScreenCapture] getSelfWindowIDs failed: $e');
+      return [];
+    }
+  }
+
+  /// 显示屏幕共享 UI（浮动控制栏 + 绿色边框）
+  static Future<bool> showScreenShareUI() async {
+    if (!Platform.isMacOS) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>('showScreenShareUI');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('[ScreenCapture] showScreenShareUI failed: $e');
+      return false;
+    }
+  }
+
+  /// 隐藏屏幕共享 UI
+  static Future<bool> hideScreenShareUI() async {
+    if (!Platform.isMacOS) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>('hideScreenShareUI');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('[ScreenCapture] hideScreenShareUI failed: $e');
+      return false;
+    }
+  }
+}
 
 /// 缩略图组件 - 监听缩略图变化
 class _ThumbnailWidget extends StatefulWidget {
@@ -173,6 +241,20 @@ class _ThumbnailWidgetState extends State<_ThumbnailWidget> {
   }
 }
 
+/// 屏幕共享选择结果
+/// 包含选中的源和需要排除的窗口 ID 列表
+class ScreenShareResult {
+  final rtc.DesktopCapturerSource source;
+  final List<int> excludeWindowIDs;
+  final bool isScreen; // true = 屏幕, false = 窗口
+
+  ScreenShareResult({
+    required this.source,
+    this.excludeWindowIDs = const [],
+    this.isScreen = false,
+  });
+}
+
 /// 自定义屏幕共享选择对话框
 class ScreenShareDialog extends StatefulWidget {
   const ScreenShareDialog({super.key});
@@ -190,6 +272,10 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
   Timer? _timer;
   bool _isLoading = true;
 
+  // 原生自排除支持
+  bool _nativeExclusionSupported = false;
+  List<int> _selfWindowIDs = [];
+
   late TabController _tabController;
 
   @override
@@ -197,6 +283,9 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_onTabChanged);
+
+    // 检查原生自排除支持并获取自窗口 ID
+    _checkNativeSupport();
 
     // 订阅源添加事件
     _subscriptions.add(
@@ -223,6 +312,22 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
 
     // 延迟加载源
     Timer(const Duration(milliseconds: 100), _getSources);
+  }
+
+  Future<void> _checkNativeSupport() async {
+    final supported = await ScreenCaptureChannel.isSupported();
+    if (supported) {
+      final ids = await ScreenCaptureChannel.getSelfWindowIDs();
+      if (mounted) {
+        setState(() {
+          _nativeExclusionSupported = true;
+          _selfWindowIDs = ids;
+        });
+      }
+      debugPrint(
+        '[ScreenShare] Native exclusion supported, self window IDs: $ids',
+      );
+    }
   }
 
   void _onTabChanged() {
@@ -282,7 +387,21 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
     for (var sub in _subscriptions) {
       sub.cancel();
     }
-    Navigator.pop<rtc.DesktopCapturerSource>(context, _selectedSource);
+
+    if (_selectedSource != null) {
+      final isScreen = _selectedSource!.type == rtc.SourceType.Screen;
+      final result = ScreenShareResult(
+        source: _selectedSource!,
+        // 如果是屏幕捕获且支持原生自排除，则传递自窗口 ID 列表
+        excludeWindowIDs: isScreen && _nativeExclusionSupported
+            ? _selfWindowIDs
+            : [],
+        isScreen: isScreen,
+      );
+      Navigator.pop<ScreenShareResult>(context, result);
+    } else {
+      Navigator.pop<ScreenShareResult>(context, null);
+    }
   }
 
   void _onCancel() {
@@ -290,7 +409,7 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
     for (var sub in _subscriptions) {
       sub.cancel();
     }
-    Navigator.pop<rtc.DesktopCapturerSource>(context, null);
+    Navigator.pop<ScreenShareResult>(context, null);
   }
 
   List<rtc.DesktopCapturerSource> get _screens =>

@@ -85,6 +85,15 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _initSdk();
     _startConnectivityListener();
+
+    // 初始化屏幕共享覆盖层回调
+    if (Platform.isMacOS) {
+      ScreenCaptureChannel.initialize();
+      ScreenCaptureChannel.onStopSharingRequested = () {
+        // 当用户点击原生浮动控制栏的"结束共享"按钮
+        _toggleScreenShare();
+      };
+    }
   }
 
   void _startConnectivityListener() {
@@ -663,21 +672,27 @@ class _HomePageState extends State<HomePage> {
         // 开启屏幕共享
         if (!kIsWeb && (Platform.isMacOS || Platform.isWindows)) {
           // 桌面平台：使用自定义窗口选择器
-          final source = await showDialog<dynamic>(
+          final result = await showDialog<ScreenShareResult>(
             context: context,
             barrierColor: Colors.black54,
             builder: (context) => const ScreenShareDialog(),
           );
 
-          if (source == null) return;
+          if (result == null) return;
 
+          // 使用 sharingType = .none 实现自排除，无需额外处理
           final track = await lk.LocalVideoTrack.createScreenShareTrack(
             lk.ScreenShareCaptureOptions(
-              sourceId: source.id as String,
+              sourceId: result.source.id,
               maxFrameRate: 15.0,
             ),
           );
           await _localParticipant!.publishVideoTrack(track);
+
+          // macOS: 显示浮动控制栏和绿色边框
+          if (Platform.isMacOS && result.isScreen) {
+            await ScreenCaptureChannel.showScreenShareUI();
+          }
         } else if (!kIsWeb && Platform.isIOS) {
           // iOS: 使用 Broadcast Extension 进行屏幕共享
           // 检查是否是模拟器，模拟器不支持 ReplayKit 屏幕共享
@@ -740,6 +755,11 @@ class _HomePageState extends State<HomePage> {
         }
       } else {
         await _localParticipant!.setScreenShareEnabled(false);
+
+        // macOS: 隐藏浮动控制栏和绿色边框
+        if (Platform.isMacOS) {
+          await ScreenCaptureChannel.hideScreenShareUI();
+        }
       }
 
       setState(() {
