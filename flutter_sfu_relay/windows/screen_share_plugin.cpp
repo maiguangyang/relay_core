@@ -482,7 +482,6 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
   default:
     return DefWindowProc(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 // Border Window Procedure
