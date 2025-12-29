@@ -123,16 +123,50 @@ void ScreenSharePlugin::HandleMethodCall(
   }
 }
 
-HWND ScreenSharePlugin::GetMainWindow() { return ::GetActiveWindow(); }
+HWND ScreenSharePlugin::GetMainWindow() {
+  // Try to get the Flutter window via the registrar's view
+  if (registrar_ && registrar_->GetView()) {
+    HWND hwnd = registrar_->GetView()->GetNativeWindow();
+    if (hwnd) {
+      // Get the top-level ancestor (in case this is a child view)
+      HWND topLevel = GetAncestor(hwnd, GA_ROOT);
+      return topLevel ? topLevel : hwnd;
+    }
+  }
+  // Fallback to GetActiveWindow (less reliable)
+  return ::GetActiveWindow();
+}
 
 void ScreenSharePlugin::SetExcludeFromCapture(bool exclude) {
   HWND hwnd = GetMainWindow();
-  if (hwnd) {
-    DWORD affinity = exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-    SetWindowDisplayAffinity(hwnd, affinity);
+  if (!hwnd) {
+    OutputDebugString(L"[ScreenShare] ERROR: Could not find main window\n");
+    return;
+  }
 
-    OutputDebugString(exclude ? L"[ScreenShare] Window excluded from capture\n"
-                              : L"[ScreenShare] Window capture restored\n");
+  DWORD affinity = exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
+  BOOL success = SetWindowDisplayAffinity(hwnd, affinity);
+
+  if (!success) {
+    DWORD error = GetLastError();
+    wchar_t buf[256];
+    swprintf_s(buf,
+               L"[ScreenShare] SetWindowDisplayAffinity FAILED! Error: %lu\n",
+               error);
+    OutputDebugString(buf);
+
+    // Common errors:
+    // 5 (ACCESS_DENIED) - not top-level window or wrong process
+    // 8 (NOT_ENOUGH_MEMORY) - WS_EX_LAYERED conflict
+    // 87 (INVALID_PARAMETER) - unsupported value
+    if (error == 8) {
+      OutputDebugString(L"[ScreenShare] Hint: ERROR_NOT_ENOUGH_MEMORY often "
+                        L"means WS_EX_LAYERED conflict\n");
+    }
+  } else {
+    OutputDebugString(
+        exclude ? L"[ScreenShare] Window excluded from capture successfully\n"
+                : L"[ScreenShare] Window capture restored successfully\n");
   }
 }
 
