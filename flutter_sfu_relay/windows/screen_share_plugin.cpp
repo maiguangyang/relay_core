@@ -39,6 +39,14 @@ const wchar_t *ScreenShareOverlay::kBorderClassName = L"ScreenShareBorder";
 // =============================================================================
 
 // static
+void ScreenSharePluginRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrarRef registrar) {
+  flutter_sfu_relay::ScreenSharePlugin::RegisterWithRegistrar(
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
+}
+
+// static
 void ScreenSharePlugin::RegisterWithRegistrar(
     flutter::PluginRegistrarWindows *registrar) {
   auto plugin = std::make_unique<ScreenSharePlugin>(registrar);
