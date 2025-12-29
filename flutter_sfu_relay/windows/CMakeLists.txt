@@ -5,7 +5,8 @@
 cmake_minimum_required(VERSION 3.14)
 
 # Project-level configuration.
-set(PROJECT_NAME "flutter_sfu_relay")
+# Flutter expects the plugin target to be named ${plugin_name}_plugin
+set(PROJECT_NAME "flutter_sfu_relay_plugin")
 project(${PROJECT_NAME} LANGUAGES C CXX)
 
 # 预编译的 Go 库路径 (已复制到当前目录)
