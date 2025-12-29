@@ -24,13 +24,25 @@ class ScreenCaptureChannel {
   static Future<List<int>> getSelfWindowIDs() async => [];
 
   static Future<bool> showScreenShareUI() async {
-    // await ScreenShareHelper.setExcludeFromCapture(true);
+    // Windows: minimize window to avoid infinite mirror effect
+    // macOS: use setExcludeFromCapture (works correctly there)
+    if (Platform.isWindows) {
+      await ScreenShareHelper.minimizeWindow();
+    } else if (Platform.isMacOS) {
+      await ScreenShareHelper.setExcludeFromCapture(true);
+    }
     await ScreenShareHelper.showOverlay();
     return true;
   }
 
   static Future<bool> hideScreenShareUI() async {
-    await ScreenShareHelper.setExcludeFromCapture(false);
+    // Windows: restore window
+    // macOS: restore capture affinity
+    if (Platform.isWindows) {
+      await ScreenShareHelper.restoreWindow();
+    } else if (Platform.isMacOS) {
+      await ScreenShareHelper.setExcludeFromCapture(false);
+    }
     await ScreenShareHelper.hideOverlay();
     return true;
   }

@@ -94,4 +94,33 @@ class ScreenShareHelper {
       return false;
     }
   }
+
+  /// Minimize the application window (Windows only)
+  ///
+  /// Used during screen sharing to prevent the infinite mirror effect.
+  /// The window is minimized but the overlay toolbar remains visible.
+  static Future<bool> minimizeWindow() async {
+    if (!isSupported || !Platform.isWindows) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>('minimizeWindow');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('[ScreenShareHelper] minimizeWindow failed: $e');
+      return false;
+    }
+  }
+
+  /// Restore the minimized application window (Windows only)
+  ///
+  /// Call this when screen sharing ends to bring the window back.
+  static Future<bool> restoreWindow() async {
+    if (!isSupported || !Platform.isWindows) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>('restoreWindow');
+      return result ?? false;
+    } catch (e) {
+      debugPrint('[ScreenShareHelper] restoreWindow failed: $e');
+      return false;
+    }
+  }
 }

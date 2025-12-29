@@ -95,6 +95,29 @@ void ScreenSharePlugin::HandleMethodCall(
     overlay_->Hide();
     result->Success(flutter::EncodableValue(true));
 
+  } else if (method_call.method_name() == "minimizeWindow") {
+    HWND hwnd = GetMainWindow();
+    if (hwnd) {
+      // Save the window handle for restore
+      main_window_handle_ = hwnd;
+      ShowWindow(hwnd, SW_MINIMIZE);
+      OutputDebugString(L"[ScreenShare] Window minimized\n");
+      result->Success(flutter::EncodableValue(true));
+    } else {
+      result->Error("NO_WINDOW", "Could not find main window");
+    }
+
+  } else if (method_call.method_name() == "restoreWindow") {
+    HWND hwnd = main_window_handle_ ? main_window_handle_ : GetMainWindow();
+    if (hwnd) {
+      ShowWindow(hwnd, SW_RESTORE);
+      SetForegroundWindow(hwnd);
+      OutputDebugString(L"[ScreenShare] Window restored\n");
+      result->Success(flutter::EncodableValue(true));
+    } else {
+      result->Error("NO_WINDOW", "Could not find main window");
+    }
+
   } else {
     result->NotImplemented();
   }

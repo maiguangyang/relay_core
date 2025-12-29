@@ -53,6 +53,7 @@ private:
   flutter::PluginRegistrarWindows *registrar_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   std::unique_ptr<ScreenShareOverlay> overlay_;
+  HWND main_window_handle_ = nullptr; // Saved handle for window restore
 };
 
 // Screen Share Overlay - Creates floating toolbar and corner borders
