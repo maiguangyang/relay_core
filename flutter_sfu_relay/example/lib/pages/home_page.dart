@@ -688,11 +688,18 @@ class _HomePageState extends State<HomePage> {
 
           if (result == null) return;
 
-          // 使用 sharingType = .none 实现自排除，无需额外处理
+          // 使用高分辨率高码率发送屏幕共享
           final track = await lk.LocalVideoTrack.createScreenShareTrack(
             lk.ScreenShareCaptureOptions(
               sourceId: result.source.id,
               maxFrameRate: 30.0,
+              params: lk.VideoParameters(
+                dimensions: const lk.VideoDimensions(1920, 1080),
+                encoding: lk.VideoEncoding(
+                  maxBitrate: 5000000, // 5 Mbps 高码率
+                  maxFramerate: 30,
+                ),
+              ),
             ),
           );
           await _localParticipant!.publishVideoTrack(track);
