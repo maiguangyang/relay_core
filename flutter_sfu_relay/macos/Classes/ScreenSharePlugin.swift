@@ -1,55 +1,85 @@
 import Cocoa
 import FlutterMacOS
 
-/// 屏幕共享覆盖层控制器
-/// 实现类似腾讯会议的浮动控制栏和绿色边框效果
-class ScreenShareOverlayController: NSObject {
+/// Screen Share Plugin for Flutter SFU Relay
+/// Provides screen capture self-exclusion functionality for macOS
+public class ScreenSharePlugin: NSObject, FlutterPlugin {
     
-    static let shared = ScreenShareOverlayController()
-    
-    // 浮动控制栏窗口
-    private var toolbarWindow: NSWindow?
-    
-    // 绿色边框窗口（四个角）
-    private var borderWindows: [NSWindow] = []
-    
-    // 主窗口引用（用于最小化/恢复）
-    private weak var mainWindow: NSWindow?
-    
-    // 方法通道引用
+    private static var instance: ScreenSharePlugin?
     private var methodChannel: FlutterMethodChannel?
+    private var overlayController: ScreenShareOverlay?
     
-    private override init() {
-        super.init()
+    public static func register(with registrar: FlutterPluginRegistrar) {
+        let channel = FlutterMethodChannel(
+            name: "com.flutter_sfu_relay.screen_share",
+            binaryMessenger: registrar.messenger
+        )
+        
+        let instance = ScreenSharePlugin()
+        instance.methodChannel = channel
+        instance.overlayController = ScreenShareOverlay(channel: channel)
+        
+        registrar.addMethodCallDelegate(instance, channel: channel)
+        ScreenSharePlugin.instance = instance
     }
     
-    // MARK: - Setup
-    
-    func setup(mainWindow: NSWindow, channel: FlutterMethodChannel) {
-        self.mainWindow = mainWindow
-        self.methodChannel = channel
-    }
-    
-    // MARK: - Public Methods
-    
-    /// 显示屏幕共享 UI（包括最小化主窗口）
-    func showScreenShareUI() {
-        DispatchQueue.main.async {
-            // 最小化主窗口
-            self.mainWindow?.miniaturize(nil)
+    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        switch call.method {
+        case "isSupported":
+            result(true)
             
-            // 延迟显示覆盖层，等待窗口最小化动画完成
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.createToolbarWindow()
-                self.createBorderWindows()
+        case "setExcludeFromCapture":
+            guard let args = call.arguments as? [String: Any],
+                  let exclude = args["exclude"] as? Bool else {
+                result(FlutterError(code: "INVALID_ARGS", message: "Missing 'exclude' parameter", details: nil))
+                return
             }
+            setExcludeFromCapture(exclude)
+            result(true)
+            
+        case "showOverlay":
+            overlayController?.show()
+            result(true)
+            
+        case "hideOverlay":
+            overlayController?.hide()
+            result(true)
+            
+        default:
+            result(FlutterMethodNotImplemented)
         }
     }
     
-    /// 隐藏屏幕共享 UI（包括恢复主窗口）
-    func hideScreenShareUI() {
+    private func setExcludeFromCapture(_ exclude: Bool) {
         DispatchQueue.main.async {
-            // 隐藏覆盖层
+            for window in NSApplication.shared.windows {
+                window.sharingType = exclude ? .none : .readOnly
+            }
+        }
+    }
+}
+
+// MARK: - Screen Share Overlay Controller
+
+class ScreenShareOverlay {
+    
+    private weak var methodChannel: FlutterMethodChannel?
+    private var toolbarWindow: NSWindow?
+    private var borderWindows: [NSWindow] = []
+    
+    init(channel: FlutterMethodChannel) {
+        self.methodChannel = channel
+    }
+    
+    func show() {
+        DispatchQueue.main.async {
+            self.createToolbarWindow()
+            self.createBorderWindows()
+        }
+    }
+    
+    func hide() {
+        DispatchQueue.main.async {
             self.toolbarWindow?.orderOut(nil)
             self.toolbarWindow = nil
             
@@ -57,44 +87,27 @@ class ScreenShareOverlayController: NSObject {
                 window.orderOut(nil)
             }
             self.borderWindows.removeAll()
-            
-            // 恢复主窗口
-            self.mainWindow?.deminiaturize(nil)
-            self.mainWindow?.makeKeyAndOrderFront(nil)
         }
     }
     
-    // MARK: - Stop Sharing Callback
-    
     @objc func stopSharingButtonClicked() {
-        print("[ScreenShare] Stop sharing button clicked - sending to Flutter")
-        
-        // 先隐藏 UI
-        hideScreenShareUI()
-        
-        // 然后通知 Flutter
+        hide()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.methodChannel?.invokeMethod("onStopSharingRequested", arguments: nil)
         }
     }
     
-    // MARK: - Floating Toolbar
-    
     private func createToolbarWindow() {
         guard let screen = NSScreen.main else { return }
         
-        // 工具栏尺寸
         let toolbarWidth: CGFloat = 200
         let toolbarHeight: CGFloat = 36
-        
-        // 计算位置（屏幕顶部居中）
         let screenFrame = screen.frame
         let x = screenFrame.midX - toolbarWidth / 2
         let y = screenFrame.maxY - toolbarHeight - 45
         
         let frame = NSRect(x: x, y: y, width: toolbarWidth, height: toolbarHeight)
         
-        // 创建窗口
         let window = NSWindow(
             contentRect: frame,
             styleMask: [.borderless],
@@ -102,29 +115,24 @@ class ScreenShareOverlayController: NSObject {
             defer: false
         )
         
-        // 窗口配置
         window.level = .floating
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
         window.isMovableByWindowBackground = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        
-        // 🔑 设置不会被屏幕捕获
         window.sharingType = .none
         
-        // 创建内容视图
-        let contentView = TencentStyleToolbar(
+        let contentView = ToolbarContentView(
             frame: NSRect(x: 0, y: 0, width: toolbarWidth, height: toolbarHeight),
-            controller: self
+            target: self,
+            action: #selector(stopSharingButtonClicked)
         )
         window.contentView = contentView
         
         window.orderFront(nil)
         self.toolbarWindow = window
     }
-    
-    // MARK: - Green Corner Borders
     
     private func createBorderWindows() {
         guard let screen = NSScreen.main else { return }
@@ -133,7 +141,6 @@ class ScreenShareOverlayController: NSObject {
         let borderThickness: CGFloat = 4
         let cornerLength: CGFloat = 60
         
-        // 定义四个角的位置
         let corners: [(x: CGFloat, y: CGFloat, isTop: Bool, isLeft: Bool)] = [
             (screenFrame.minX, screenFrame.maxY - cornerLength, true, true),
             (screenFrame.maxX - cornerLength, screenFrame.maxY - cornerLength, true, false),
@@ -159,7 +166,7 @@ class ScreenShareOverlayController: NSObject {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.sharingType = .none
             
-            let borderView = GreenCornerView(
+            let borderView = CornerBorderView(
                 frame: NSRect(x: 0, y: 0, width: cornerLength, height: cornerLength),
                 isTop: isTop,
                 isLeft: isLeft,
@@ -173,50 +180,43 @@ class ScreenShareOverlayController: NSObject {
     }
 }
 
-// MARK: - Tencent Style Toolbar (仿腾讯会议风格)
+// MARK: - Toolbar Content View
 
-class TencentStyleToolbar: NSView {
+class ToolbarContentView: NSView {
     
-    private weak var controller: ScreenShareOverlayController?
-    
-    init(frame frameRect: NSRect, controller: ScreenShareOverlayController) {
-        self.controller = controller
+    init(frame frameRect: NSRect, target: AnyObject, action: Selector) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        setupUI()
+        setupUI(target: target, action: action)
     }
     
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError() }
     
     override func draw(_ dirtyRect: NSRect) {
-        // 深灰色圆角背景 (类似腾讯会议)
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8)
         NSColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 0.95).setFill()
         path.fill()
     }
     
-    private func setupUI() {
-        // 1. 绿色圆点指示器
+    private func setupUI(target: AnyObject, action: Selector) {
+        // Green dot
         let dot = NSView(frame: NSRect(x: 12, y: 12, width: 10, height: 10))
         dot.wantsLayer = true
         dot.layer?.backgroundColor = NSColor(red: 0.2, green: 0.85, blue: 0.4, alpha: 1.0).cgColor
         dot.layer?.cornerRadius = 5
         addSubview(dot)
         
-        // 2. 状态文本
+        // Status text
         let label = NSTextField(frame: NSRect(x: 28, y: 9, width: 85, height: 18))
         label.stringValue = "正在共享屏幕"
         label.isBezeled = false
         label.isEditable = false
         label.isSelectable = false
         label.backgroundColor = .clear
-        label.textColor = NSColor.white
-        label.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        label.textColor = .white
+        label.font = NSFont.systemFont(ofSize: 12)
         addSubview(label)
         
-        // 3. 结束共享按钮 (使用 NSButton)
+        // Stop button
         let button = NSButton(frame: NSRect(x: 118, y: 6, width: 72, height: 24))
         button.title = "结束共享"
         button.bezelStyle = .rounded
@@ -226,15 +226,15 @@ class TencentStyleToolbar: NSView {
         button.layer?.cornerRadius = 4
         button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         button.contentTintColor = .white
-        button.target = controller
-        button.action = #selector(ScreenShareOverlayController.stopSharingButtonClicked)
+        button.target = target
+        button.action = action
         addSubview(button)
     }
 }
 
-// MARK: - Green Corner View
+// MARK: - Corner Border View
 
-class GreenCornerView: NSView {
+class CornerBorderView: NSView {
     
     private let isTop: Bool
     private let isLeft: Bool
@@ -247,9 +247,7 @@ class GreenCornerView: NSView {
         super.init(frame: frameRect)
     }
     
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError() }
     
     override func draw(_ dirtyRect: NSRect) {
         let green = NSColor(red: 0.15, green: 0.85, blue: 0.35, alpha: 1.0)
@@ -259,9 +257,7 @@ class GreenCornerView: NSView {
         path.lineWidth = thickness
         path.lineCapStyle = .square
         
-        let w = bounds.width
-        let h = bounds.height
-        let t = thickness / 2
+        let w = bounds.width, h = bounds.height, t = thickness / 2
         
         if isTop && isLeft {
             path.move(to: NSPoint(x: t, y: 0))

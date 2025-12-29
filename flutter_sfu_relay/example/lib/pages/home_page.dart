@@ -86,11 +86,12 @@ class _HomePageState extends State<HomePage> {
     _initSdk();
     _startConnectivityListener();
 
-    // 初始化屏幕共享覆盖层回调
-    if (Platform.isMacOS) {
+    // 初始化屏幕共享覆盖层回调 (macOS/Windows)
+    if (Platform.isMacOS || Platform.isWindows) {
       ScreenCaptureChannel.initialize();
       ScreenCaptureChannel.onStopSharingRequested = () {
-        // 当用户点击原生浮动控制栏的"结束共享"按钮
+        // 当用户点击原生浮动控制栏的"结束共享"按钮 (macOS)
+        // 或者通过其他方式请求停止共享 (Windows)
         _toggleScreenShare();
       };
     }
@@ -689,8 +690,8 @@ class _HomePageState extends State<HomePage> {
           );
           await _localParticipant!.publishVideoTrack(track);
 
-          // macOS: 显示浮动控制栏和绿色边框
-          if (Platform.isMacOS && result.isScreen) {
+          // macOS/Windows: 显示屏幕共享 UI（最小化窗口 + 排除捕获）
+          if ((Platform.isMacOS || Platform.isWindows) && result.isScreen) {
             await ScreenCaptureChannel.showScreenShareUI();
           }
         } else if (!kIsWeb && Platform.isIOS) {
@@ -756,8 +757,8 @@ class _HomePageState extends State<HomePage> {
       } else {
         await _localParticipant!.setScreenShareEnabled(false);
 
-        // macOS: 隐藏浮动控制栏和绿色边框
-        if (Platform.isMacOS) {
+        // macOS/Windows: 隐藏屏幕共享 UI 并恢复窗口
+        if (Platform.isMacOS || Platform.isWindows) {
           await ScreenCaptureChannel.hideScreenShareUI();
         }
       }
@@ -1271,9 +1272,7 @@ class _HomePageState extends State<HomePage> {
     final isLocalSharing =
         _screenShareParticipant?.identity == _localParticipant?.identity;
 
-    if (_screenShareParticipant != null &&
-        _isScreenShareMaximized &&
-        !isLocalSharing) {
+    if (_screenShareParticipant != null && _isScreenShareMaximized) {
       return _buildFeaturedLayout();
     }
 

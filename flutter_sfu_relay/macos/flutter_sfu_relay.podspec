@@ -18,9 +18,9 @@ Pod::Spec.new do |s|
   # 使用预编译的 Go 动态库
   s.vendored_libraries = 'librelay.dylib'
   
-  # 需要复制头文件以便 FFI 可以找到符号
+  # 头文件和 Swift 源码
   s.public_header_files = 'librelay.h'
-  s.source_files = 'librelay.h'
+  s.source_files = 'librelay.h', 'Classes/**/*.swift'
 
   s.dependency 'FlutterMacOS'
 
@@ -30,4 +30,5 @@ Pod::Spec.new do |s|
     # 确保运行时可以找到动态库
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks'
   }
+  s.swift_version = '5.0'
 end

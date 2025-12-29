@@ -11,6 +11,32 @@ project(${PROJECT_NAME} LANGUAGES C CXX)
 # 预编译的 Go 库路径 (已复制到当前目录)
 set(PREBUILT_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 
+# Screen Share Plugin 源文件
+set(PLUGIN_SOURCES
+  "screen_share_plugin.cpp"
+  "screen_share_plugin.h"
+)
+
+# 创建插件库
+add_library(${PROJECT_NAME} SHARED ${PLUGIN_SOURCES})
+
+# 设置插件属性
+target_compile_definitions(${PROJECT_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
+
+# Apply standard settings from the Flutter plugin interface
+apply_standard_settings(${PROJECT_NAME})
+
+# Include directories: PRIVATE for internal compilation, INTERFACE for consumers
+target_include_directories(${PROJECT_NAME} PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${FLUTTER_EPHEMERAL_DIR}/include"
+  "${FLUTTER_EPHEMERAL_DIR}/include/flutter"
+)
+target_include_directories(${PROJECT_NAME} INTERFACE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+target_link_libraries(${PROJECT_NAME} PRIVATE flutter flutter_wrapper_plugin)
+
 # 如果预编译库存在，直接使用
 if(EXISTS "${PREBUILT_LIB_PATH}/librelay.dll")
   # 设置要打包的库

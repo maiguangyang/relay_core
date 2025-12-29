@@ -5,71 +5,34 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
+import 'package:flutter_sfu_relay/screen_share_helper.dart';
 import '../theme/app_theme.dart';
 
-/// Native screen capture channel for macOS
-/// Note: Self-exclusion is handled by NSWindow.sharingType = .none in Swift
+/// Backwards-compatible wrapper that delegates to plugin's ScreenShareHelper
+/// 向后兼容的包装类，代理到插件的 ScreenShareHelper
 class ScreenCaptureChannel {
-  static const _channel = MethodChannel('com.example.screencapture');
-
-  // 停止共享回调
-  static VoidCallback? onStopSharingRequested;
-
-  /// 初始化方法调用处理（用于接收原生端的回调）
-  static void initialize() {
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'onStopSharingRequested') {
-        debugPrint('[ScreenCapture] Stop sharing requested from native UI');
-        onStopSharingRequested?.call();
-      }
-    });
+  static VoidCallback? get onStopSharingRequested =>
+      ScreenShareHelper.onStopSharingRequested;
+  static set onStopSharingRequested(VoidCallback? callback) {
+    ScreenShareHelper.onStopSharingRequested = callback;
   }
 
-  /// Check if native self-exclusion is supported
-  static Future<bool> isSupported() async {
-    if (!Platform.isMacOS) return false;
-    try {
-      final result = await _channel.invokeMethod<bool>('isSupported');
-      return result ?? false;
-    } catch (e) {
-      debugPrint('[ScreenCapture] isSupported check failed: $e');
-      return false;
-    }
-  }
+  static void initialize() => ScreenShareHelper.initialize();
 
-  /// Get app's own window IDs (for debugging/reference)
-  static Future<List<int>> getSelfWindowIDs() async {
-    try {
-      final result = await _channel.invokeMethod<List>('getSelfWindowIDs');
-      return result?.cast<int>() ?? [];
-    } catch (e) {
-      debugPrint('[ScreenCapture] getSelfWindowIDs failed: $e');
-      return [];
-    }
-  }
+  static Future<bool> isSupported() async => ScreenShareHelper.isSupported;
 
-  /// 显示屏幕共享 UI（浮动控制栏 + 绿色边框）
+  static Future<List<int>> getSelfWindowIDs() async => [];
+
   static Future<bool> showScreenShareUI() async {
-    if (!Platform.isMacOS) return false;
-    try {
-      final result = await _channel.invokeMethod<bool>('showScreenShareUI');
-      return result ?? false;
-    } catch (e) {
-      debugPrint('[ScreenCapture] showScreenShareUI failed: $e');
-      return false;
-    }
+    await ScreenShareHelper.setExcludeFromCapture(true);
+    await ScreenShareHelper.showOverlay();
+    return true;
   }
 
-  /// 隐藏屏幕共享 UI
   static Future<bool> hideScreenShareUI() async {
-    if (!Platform.isMacOS) return false;
-    try {
-      final result = await _channel.invokeMethod<bool>('hideScreenShareUI');
-      return result ?? false;
-    } catch (e) {
-      debugPrint('[ScreenCapture] hideScreenShareUI failed: $e');
-      return false;
-    }
+    await ScreenShareHelper.setExcludeFromCapture(false);
+    await ScreenShareHelper.hideOverlay();
+    return true;
   }
 }
 

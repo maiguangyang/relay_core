@@ -47,8 +47,10 @@ flutter:
         ffiPlugin: true
       macos:
         ffiPlugin: true
+        pluginClass: ScreenSharePlugin
       windows:
         ffiPlugin: true
+        pluginClass: ScreenSharePlugin
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:
