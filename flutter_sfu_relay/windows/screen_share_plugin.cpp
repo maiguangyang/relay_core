@@ -435,6 +435,11 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
       HDC hdc = lpDIS->hDC;
       RECT rc = lpDIS->rcItem;
 
+      // First fill with toolbar background color to eliminate white corners
+      if (instance_ && instance_->toolbar_brush_) {
+        FillRect(hdc, &rc, instance_->toolbar_brush_);
+      }
+
       // Red background: RGB(230, 64, 77) = macOS rgba(0.9, 0.25, 0.3, 1.0)
       HBRUSH redBrush = CreateSolidBrush(RGB(230, 64, 77));
 
