@@ -24,7 +24,7 @@ class ScreenCaptureChannel {
   static Future<List<int>> getSelfWindowIDs() async => [];
 
   static Future<bool> showScreenShareUI() async {
-    await ScreenShareHelper.setExcludeFromCapture(true);
+    // await ScreenShareHelper.setExcludeFromCapture(true);
     await ScreenShareHelper.showOverlay();
     return true;
   }
