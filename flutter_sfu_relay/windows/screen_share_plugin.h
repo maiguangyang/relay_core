@@ -16,7 +16,9 @@ class ScreenShareOverlay;
 
 // Screen Share Plugin for Windows
 // Provides screen capture self-exclusion and native overlay UI
-class ScreenSharePlugin {
+// Screen Share Plugin for Windows
+// Provides screen capture self-exclusion and native overlay UI
+class ScreenSharePlugin : public flutter::Plugin {
 public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarWindows *registrar);
 
