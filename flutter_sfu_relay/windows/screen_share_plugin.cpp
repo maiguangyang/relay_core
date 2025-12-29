@@ -18,9 +18,12 @@
 #include <flutter/standard_method_codec.h>
 
 #include <dwmapi.h>
+#include <gdiplus.h>
 #include <string>
 #include <windows.h>
 #include <windowsx.h>
+
+#pragma comment(lib, "gdiplus.lib")
 
 // WDA_EXCLUDEFROMCAPTURE is available in Windows 10 version 2004+
 #ifndef WDA_EXCLUDEFROMCAPTURE
@@ -210,9 +213,13 @@ ScreenShareOverlay::ScreenShareOverlay(
     flutter::MethodChannel<flutter::EncodableValue> *channel)
     : channel_(channel), toolbar_window_(nullptr), toolbar_brush_(nullptr),
       green_brush_(nullptr), label_font_(nullptr), button_font_(nullptr),
-      classes_registered_(false) {
+      classes_registered_(false), gdiplus_token_(0) {
   instance_ = this;
   RegisterWindowClasses();
+
+  // Initialize GDI+ for anti-aliased drawing
+  Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+  Gdiplus::GdiplusStartup(&gdiplus_token_, &gdiplusStartupInput, nullptr);
 
   // Create brushes - match macOS colors
   toolbar_brush_ = CreateSolidBrush(
@@ -251,6 +258,10 @@ ScreenShareOverlay::~ScreenShareOverlay() {
     DeleteObject(label_font_);
   if (button_font_)
     DeleteObject(button_font_);
+
+  // Shutdown GDI+
+  if (gdiplus_token_)
+    Gdiplus::GdiplusShutdown(gdiplus_token_);
 
   UnregisterWindowClasses();
   instance_ = nullptr;
@@ -440,14 +451,25 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
         FillRect(hdc, &rc, instance_->toolbar_brush_);
       }
 
-      // Red background: RGB(230, 64, 77) = macOS rgba(0.9, 0.25, 0.3, 1.0)
-      HBRUSH redBrush = CreateSolidBrush(RGB(230, 64, 77));
+      // Use GDI+ for anti-aliased smooth rounded corners
+      Gdiplus::Graphics graphics(hdc);
+      graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-      // Create rounded rect region (4px radius like macOS)
-      HRGN rgn = CreateRoundRectRgn(rc.left, rc.top, rc.right, rc.bottom, 8, 8);
-      FillRgn(hdc, rgn, redBrush);
-      DeleteObject(rgn);
-      DeleteObject(redBrush);
+      // Red background: RGB(230, 64, 77) = macOS rgba(0.9, 0.25, 0.3, 1.0)
+      Gdiplus::SolidBrush redBrush(Gdiplus::Color(255, 230, 64, 77));
+
+      // Create rounded rect path
+      Gdiplus::GraphicsPath path;
+      int radius = 8;
+      int x = rc.left, y = rc.top, w = rc.right - rc.left,
+          h = rc.bottom - rc.top;
+      path.AddArc(x, y, radius, radius, 180, 90);
+      path.AddArc(x + w - radius, y, radius, radius, 270, 90);
+      path.AddArc(x + w - radius, y + h - radius, radius, radius, 0, 90);
+      path.AddArc(x, y + h - radius, radius, radius, 90, 90);
+      path.CloseFigure();
+
+      graphics.FillPath(&redBrush, &path);
 
       // Draw button text
       SetBkMode(hdc, TRANSPARENT);

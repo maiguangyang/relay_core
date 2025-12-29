@@ -86,6 +86,7 @@ private:
   HFONT label_font_;
   HFONT button_font_;
   bool classes_registered_;
+  ULONG_PTR gdiplus_token_; // GDI+ token for anti-aliased drawing
 
   static ScreenShareOverlay *instance_;
   static const wchar_t *kToolbarClassName;
