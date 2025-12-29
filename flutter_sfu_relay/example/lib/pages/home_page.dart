@@ -485,7 +485,7 @@ class _HomePageState extends State<HomePage> {
               // 请求最高质量的视频层（解决接收端模糊问题）
               if (!isLocal && pub is lk.RemoteTrackPublication) {
                 pub.setVideoQuality(lk.VideoQuality.HIGH);
-                pub.setVideoFPS(30);
+                pub.setVideoFPS(60);
               }
               _screenShareParticipant = p;
               break;
@@ -692,12 +692,12 @@ class _HomePageState extends State<HomePage> {
           final track = await lk.LocalVideoTrack.createScreenShareTrack(
             lk.ScreenShareCaptureOptions(
               sourceId: result.source.id,
-              maxFrameRate: 30.0,
+              maxFrameRate: 60.0,
               params: lk.VideoParameters(
                 dimensions: const lk.VideoDimensions(1920, 1080),
                 encoding: lk.VideoEncoding(
                   maxBitrate: 5000000, // 5 Mbps 高码率
-                  maxFramerate: 30,
+                  maxFramerate: 60,
                 ),
               ),
             ),
@@ -736,7 +736,7 @@ class _HomePageState extends State<HomePage> {
                 true,
                 screenShareCaptureOptions: const lk.ScreenShareCaptureOptions(
                   useiOSBroadcastExtension: true,
-                  maxFrameRate: 15.0,
+                  maxFrameRate: 60.0,
                 ),
               )
               .then((_) {
@@ -855,7 +855,7 @@ class _HomePageState extends State<HomePage> {
           !pub.muted) {
         if (pub is lk.RemoteTrackPublication) {
           pub.setVideoQuality(lk.VideoQuality.HIGH);
-          pub.setVideoFPS(30);
+          pub.setVideoFPS(60);
         }
         screenTrack = pub.track as lk.VideoTrack;
         break;
@@ -1925,7 +1925,7 @@ class _HomePageState extends State<HomePage> {
         // 请求最高质量的视频层（解决接收端模糊问题）
         if (pub is lk.RemoteTrackPublication) {
           pub.setVideoQuality(lk.VideoQuality.HIGH);
-          pub.setVideoFPS(30);
+          pub.setVideoFPS(60);
         }
         screenTrack = pub.track as lk.VideoTrack;
         break;

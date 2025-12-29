@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
 )
@@ -153,6 +154,11 @@ func (b *LiveKitBridge) onTrackSubscribed(
 	atomic.AddInt32(&b.tracksSubscribed, 1)
 
 	isVideo := track.Kind() == webrtc.RTPCodecTypeVideo
+
+	// 对视频轨道请求最高质量（解决屏幕共享模糊问题）
+	if isVideo {
+		pub.SetVideoQuality(livekit.VideoQuality_HIGH)
+	}
 
 	// 启动 RTP 读取循环
 	go b.readRTPLoop(track, isVideo, rp.Identity())
