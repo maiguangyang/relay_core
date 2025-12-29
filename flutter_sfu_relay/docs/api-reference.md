@@ -410,3 +410,44 @@ PingHandler.init();
 
 Stream<PingRequest> get pingRequests;
 ```
+
+---
+
+## Screen Share 模块
+
+### ScreenShareHelper
+
+屏幕共享自排除和原生悬浮控制栏。
+
+```dart
+import 'package:flutter_sfu_relay/screen_share_helper.dart';
+
+// 初始化（一次性调用）
+ScreenShareHelper.initialize();
+
+// 设置停止共享回调
+ScreenShareHelper.onStopSharingRequested = () {
+  // 用户点击了悬浮栏的"结束共享"按钮
+  stopScreenShare();
+};
+
+// 检查平台支持
+bool supported = ScreenShareHelper.isSupported; // macOS/Windows/Linux
+
+// 开始屏幕共享时
+await ScreenShareHelper.setExcludeFromCapture(true);  // 窗口自排除
+await ScreenShareHelper.showOverlay();                 // 显示悬浮控制栏
+
+// 结束屏幕共享时
+await ScreenShareHelper.setExcludeFromCapture(false); // 恢复可捕获
+await ScreenShareHelper.hideOverlay();                 // 隐藏悬浮控制栏
+```
+
+**平台实现：**
+
+| 功能 | macOS | Windows | Linux |
+|------|-------|---------|-------|
+| 窗口自排除 | `sharingType = .none` | `SetWindowDisplayAffinity` | ❌ 无标准 API |
+| 浮动工具栏 | NSWindow | Win32 POPUP | GTK+ POPUP |
+| 绿色角落边框 | ✅ | ✅ | ✅ |
+| 结束共享按钮 | ✅ | ✅ | ✅ |

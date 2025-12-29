@@ -119,6 +119,8 @@ flutter create --platforms=web .
 | Linux | PulseAudio | V4L2 | 默认允许 | PipeWire |
 | Web | 浏览器弹窗 | 浏览器弹窗 | 默认允许 | 浏览器弹窗 |
 
+> **屏幕共享自排除**：当使用 `ScreenShareHelper` 进行屏幕共享时，macOS/Windows 会自动将应用窗口从屏幕捕获中排除（避免"无限套娃"效果），并显示原生悬浮控制栏。此功能由插件自动处理，无需额外权限配置。
+
 ## 常见问题
 
 ### 1. macOS 没有声音

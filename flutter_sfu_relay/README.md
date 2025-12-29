@@ -34,7 +34,8 @@
 - ⚡ **快速故障切换** - ~2.5 秒自动切换到备用 Relay
 - 💓 **心跳检测** - 1s 间隔，1.5s 超时，快速检测 Peer 离线
 - 📱 **本地分享切换** - 支持屏幕共享优先级
-- 📊 **流量统计** - 带宽和丢包监控
+- �️ **屏幕共享自排除** - macOS/Windows/Linux 原生悬浮控制栏
+- �📊 **流量统计** - 带宽和丢包监控
 - 🎚️ **抖动缓冲** - 可选的网络抖动平滑
 - 🔙 **降级机制** - 连续 N 次选举失败后自动降级到直连 SFU
 
@@ -235,6 +236,12 @@ lkRoom.onDataReceived = (data, participant, topic) {
 | `EventHandler` | Go 层事件 → Dart Stream |
 | `LogHandler` | Go 层日志 → Dart Stream |
 | `PingHandler` | Ping 请求 → 信令转发 |
+
+### 屏幕共享 (`screen_share_helper.dart`)
+
+| 类 | 功能 |
+|----|------|
+| `ScreenShareHelper` | 屏幕共享自排除 + 原生悬浮控制栏 |
 
 ### 信令 (`signaling/`)
 
