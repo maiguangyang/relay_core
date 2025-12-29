@@ -2,13 +2,22 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:window_manager/window_manager.dart';
 
 import 'pages/home_page.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化 window_manager（桌面平台全屏功能需要）
+  if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    await windowManager.ensureInitialized();
+  }
+
   // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
   // Go层现在有50ms grace period来让进行中的回调完成
   try {

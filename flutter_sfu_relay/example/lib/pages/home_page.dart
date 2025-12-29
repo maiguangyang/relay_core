@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/control_bar.dart';
@@ -780,6 +781,24 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 进入系统级全屏模式
+  Future<void> _enterFullscreen() async {
+    if (!kIsWeb &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+      await windowManager.setFullScreen(true);
+    }
+    setState(() => _isScreenShareFullscreen = true);
+  }
+
+  /// 退出系统级全屏模式
+  Future<void> _exitFullscreen() async {
+    if (!kIsWeb &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+      await windowManager.setFullScreen(false);
+    }
+    setState(() => _isScreenShareFullscreen = false);
+  }
+
   void _leave() {
     _disconnect();
   }
@@ -839,7 +858,7 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
-        onDoubleTap: () => setState(() => _isScreenShareFullscreen = false),
+        onDoubleTap: _exitFullscreen,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -868,8 +887,7 @@ class _HomePageState extends State<HomePage> {
               top: MediaQuery.of(context).padding.top + 16,
               right: 16,
               child: IconButton(
-                onPressed: () =>
-                    setState(() => _isScreenShareFullscreen = false),
+                onPressed: _exitFullscreen,
                 style: IconButton.styleFrom(
                   backgroundColor: Colors.black54,
                   padding: const EdgeInsets.all(12),
@@ -1910,7 +1928,7 @@ class _HomePageState extends State<HomePage> {
     // 全屏模式
     if (_isScreenShareFullscreen) {
       return GestureDetector(
-        onDoubleTap: () => setState(() => _isScreenShareFullscreen = false),
+        onDoubleTap: _exitFullscreen,
         child: Container(
           color: Colors.black,
           child: Stack(
@@ -1939,8 +1957,7 @@ class _HomePageState extends State<HomePage> {
                 top: 16,
                 right: 16,
                 child: IconButton(
-                  onPressed: () =>
-                      setState(() => _isScreenShareFullscreen = false),
+                  onPressed: () => _exitFullscreen(),
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.black54,
                     padding: const EdgeInsets.all(12),
@@ -2005,8 +2022,7 @@ class _HomePageState extends State<HomePage> {
           child: Padding(
             padding: const EdgeInsets.all(8),
             child: GestureDetector(
-              onDoubleTap: () =>
-                  setState(() => _isScreenShareFullscreen = true),
+              onDoubleTap: _enterFullscreen,
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
@@ -2089,8 +2105,7 @@ class _HomePageState extends State<HomePage> {
                         bottom: 12,
                         right: 12,
                         child: IconButton(
-                          onPressed: () =>
-                              setState(() => _isScreenShareFullscreen = true),
+                          onPressed: _enterFullscreen,
                           style: IconButton.styleFrom(
                             backgroundColor: Colors.black54,
                             padding: const EdgeInsets.all(8),

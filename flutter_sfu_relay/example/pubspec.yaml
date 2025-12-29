@@ -52,6 +52,9 @@ dependencies:
   # Network connectivity detection
   connectivity_plus: ^7.0.0
   device_info_plus: ^12.2.0
+  
+  # Window management for desktop fullscreen
+  window_manager: ^0.4.3
 
 dev_dependencies:
   flutter_test:
