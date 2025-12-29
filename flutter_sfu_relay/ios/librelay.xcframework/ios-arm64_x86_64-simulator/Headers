@@ -12,6 +12,8 @@
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
 typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+extern size_t _GoStringLen(_GoString_ s);
+extern const char *_GoStringPtr(_GoString_ s);
 #endif
 
 #endif
@@ -182,9 +184,15 @@ typedef size_t GoUintptr;
 typedef float GoFloat32;
 typedef double GoFloat64;
 #ifdef _MSC_VER
+#if !defined(__cplusplus) || _MSVC_LANG <= 201402L
 #include <complex.h>
 typedef _Fcomplex GoComplex64;
 typedef _Dcomplex GoComplex128;
+#else
+#include <complex>
+typedef std::complex<float> GoComplex64;
+typedef std::complex<double> GoComplex128;
+#endif
 #else
 typedef float _Complex GoComplex64;
 typedef double _Complex GoComplex128;
@@ -268,11 +276,11 @@ extern void SetPingCallback(PingCallback callback);
 
 // CodecGetSupportedVideo 获取支持的视频编解码器列表
 //
-extern char* CodecGetSupportedVideo();
+extern char* CodecGetSupportedVideo(void);
 
 // CodecGetSupportedAudio 获取支持的音频编解码器列表
 //
-extern char* CodecGetSupportedAudio();
+extern char* CodecGetSupportedAudio(void);
 
 // CodecParseType 解析 MimeType 获取编解码器类型
 //
@@ -325,8 +333,8 @@ extern void SetEventCallback(EventCallback callback);
 extern void SetLogCallback(LogCallback callback);
 extern void SetLogLevel(int level);
 extern void FreeString(char* s);
-extern void CleanupAll();
-extern char* GetVersion();
+extern void CleanupAll(void);
+extern char* GetVersion(void);
 
 // SourceSwitcherCreate 创建源切换器
 //
@@ -551,11 +559,11 @@ extern int RelayRoomStopLocalShare(char* roomID);
 
 // BufferPoolGetStats 获取全局缓冲池统计
 //
-extern char* BufferPoolGetStats();
+extern char* BufferPoolGetStats(void);
 
 // BufferPoolResetStats 重置缓冲池统计
 //
-extern void BufferPoolResetStats();
+extern void BufferPoolResetStats(void);
 
 // StatsCreate 创建房间统计
 //
