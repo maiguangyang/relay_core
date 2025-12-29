@@ -17,8 +17,6 @@
 #include <windows.h>
 #include <windowsx.h>
 
-#pragma comment(lib, "dwmapi.lib")
-
 // WDA_EXCLUDEFROMCAPTURE is available in Windows 10 version 2004+
 #ifndef WDA_EXCLUDEFROMCAPTURE
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
@@ -39,7 +37,7 @@ const wchar_t *ScreenShareOverlay::kBorderClassName = L"ScreenShareBorder";
 // =============================================================================
 
 // static
-void ScreenSharePluginRegisterWithRegistrar(
+extern "C" __declspec(dllexport) void ScreenSharePluginRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   auto *plugin_registrar = new flutter::PluginRegistrarWindows(registrar);
   flutter_sfu_relay::ScreenSharePlugin::RegisterWithRegistrar(plugin_registrar);

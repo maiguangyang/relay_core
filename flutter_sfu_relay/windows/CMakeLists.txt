@@ -36,7 +36,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE flutter flutter_wrapper_plugin)
+target_link_libraries(${PROJECT_NAME} PRIVATE flutter flutter_wrapper_plugin user32.lib gdi32.lib dwmapi.lib)
 
 # 如果预编译库存在，直接使用
 if(EXISTS "${PREBUILT_LIB_PATH}/librelay.dll")
