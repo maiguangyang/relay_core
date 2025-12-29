@@ -690,8 +690,9 @@ class _HomePageState extends State<HomePage> {
           );
           await _localParticipant!.publishVideoTrack(track);
 
-          // macOS/Windows: 显示屏幕共享 UI（最小化窗口 + 排除捕获）
-          if ((Platform.isMacOS || Platform.isWindows) && result.isScreen) {
+          // macOS/Windows/Linux: 显示屏幕共享 UI（最小化窗口 + 排除捕获）
+          if ((Platform.isMacOS || Platform.isWindows || Platform.isLinux) &&
+              result.isScreen) {
             await ScreenCaptureChannel.showScreenShareUI();
           }
         } else if (!kIsWeb && Platform.isIOS) {

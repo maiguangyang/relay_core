@@ -38,7 +38,7 @@ class ScreenShareHelper {
   /// Check if screen share helper is supported on this platform
   static bool get isSupported {
     if (kIsWeb) return false;
-    return Platform.isMacOS || Platform.isWindows;
+    return Platform.isMacOS || Platform.isWindows || Platform.isLinux;
   }
 
   /// Set whether the application window should be excluded from screen capture

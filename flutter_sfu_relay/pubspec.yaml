@@ -45,6 +45,7 @@ flutter:
         ffiPlugin: true
       linux:
         ffiPlugin: true
+        pluginClass: ScreenSharePlugin
       macos:
         ffiPlugin: true
         pluginClass: ScreenSharePlugin
