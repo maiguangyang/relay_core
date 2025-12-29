@@ -160,6 +160,21 @@ func (b *LiveKitBridge) onTrackSubscribed(
 		pub.SetVideoQuality(livekit.VideoQuality_HIGH)
 	}
 
+	// 获取远端轨道的完整编码参数，并更新 SourceSwitcher 的 Track
+	// 这是解决画质模糊问题的关键：使用远端轨道的真实编码参数
+	if b.switcher != nil {
+		codec := track.Codec()
+		if isVideo {
+			if err := b.switcher.SetVideoCodec(codec.RTPCodecCapability); err != nil {
+				// 设置编码器失败，记录但继续转发
+			}
+		} else {
+			if err := b.switcher.SetAudioCodec(codec.RTPCodecCapability); err != nil {
+				// 设置编码器失败，记录但继续转发
+			}
+		}
+	}
+
 	// 启动 RTP 读取循环
 	go b.readRTPLoop(track, isVideo, rp.Identity())
 }

@@ -121,6 +121,53 @@ func (ss *SourceSwitcher) GetAudioTrack() *webrtc.TrackLocalStaticRTP {
 	return ss.audioTrack
 }
 
+// SetVideoCodec 设置视频编解码器（从远端轨道获取完整参数）
+// 解决画质模糊问题：使用远端轨道的完整编码参数而不是默认的最小配置
+func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.closed {
+		return ErrForwarderClosed
+	}
+
+	// 创建新的视频 Track，使用完整的编码参数
+	newTrack, err := webrtc.NewTrackLocalStaticRTP(
+		codec,
+		"video-relay",
+		"relay-stream",
+	)
+	if err != nil {
+		return err
+	}
+
+	ss.videoTrack = newTrack
+	return nil
+}
+
+// SetAudioCodec 设置音频编解码器（从远端轨道获取完整参数）
+func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.closed {
+		return ErrForwarderClosed
+	}
+
+	// 创建新的音频 Track，使用完整的编码参数
+	newTrack, err := webrtc.NewTrackLocalStaticRTP(
+		codec,
+		"audio-relay",
+		"relay-stream",
+	)
+	if err != nil {
+		return err
+	}
+
+	ss.audioTrack = newTrack
+	return nil
+}
+
 // GetActiveSource 返回当前活跃的源类型
 func (ss *SourceSwitcher) GetActiveSource() SourceType {
 	return SourceType(ss.activeSource.Load())
