@@ -6,6 +6,11 @@
  * Screen Share Plugin for Windows
  * Implements native floating toolbar and corner borders (matching macOS)
  */
+
+// Force MSVC to use UTF-8 for source file encoding
+#if defined(_MSC_VER)
+#pragma execution_character_set("utf-8")
+#endif
 #include "include/flutter_sfu_relay/screen_share_plugin.h"
 
 #include <flutter/method_channel.h>

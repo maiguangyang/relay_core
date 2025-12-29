@@ -24,6 +24,11 @@ add_library(${PROJECT_NAME} SHARED ${PLUGIN_SOURCES})
 # 设置插件属性
 target_compile_definitions(${PROJECT_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 
+# Enable UTF-8 for source files (fixes Chinese character encoding)
+if(MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
+endif()
+
 # Apply standard settings from the Flutter plugin interface
 apply_standard_settings(${PROJECT_NAME})
 
