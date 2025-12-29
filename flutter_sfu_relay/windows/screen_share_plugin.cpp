@@ -144,6 +144,23 @@ void ScreenSharePlugin::SetExcludeFromCapture(bool exclude) {
     return;
   }
 
+  // Get current extended style
+  LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+  bool hasLayered = (exStyle & WS_EX_LAYERED) != 0;
+
+  if (exclude) {
+    // WORKAROUND: WS_EX_LAYERED conflicts with WDA_EXCLUDEFROMCAPTURE
+    // Temporarily remove the layered style, apply affinity, then restore
+    if (hasLayered) {
+      OutputDebugString(L"[ScreenShare] Removing WS_EX_LAYERED temporarily\n");
+      original_ex_style_ = exStyle;
+      SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED);
+      // Force window to redraw with new style
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+  }
+
   DWORD affinity = exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
   BOOL success = SetWindowDisplayAffinity(hwnd, affinity);
 
@@ -155,18 +172,28 @@ void ScreenSharePlugin::SetExcludeFromCapture(bool exclude) {
                error);
     OutputDebugString(buf);
 
-    // Common errors:
-    // 5 (ACCESS_DENIED) - not top-level window or wrong process
-    // 8 (NOT_ENOUGH_MEMORY) - WS_EX_LAYERED conflict
-    // 87 (INVALID_PARAMETER) - unsupported value
-    if (error == 8) {
-      OutputDebugString(L"[ScreenShare] Hint: ERROR_NOT_ENOUGH_MEMORY often "
-                        L"means WS_EX_LAYERED conflict\n");
+    // If failed and we removed layered, restore it
+    if (exclude && hasLayered && original_ex_style_) {
+      SetWindowLongPtr(hwnd, GWL_EXSTYLE, original_ex_style_);
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      OutputDebugString(
+          L"[ScreenShare] Restored WS_EX_LAYERED after failure\n");
     }
   } else {
     OutputDebugString(
         exclude ? L"[ScreenShare] Window excluded from capture successfully\n"
                 : L"[ScreenShare] Window capture restored successfully\n");
+
+    // When disabling exclusion, restore original style if it had WS_EX_LAYERED
+    if (!exclude && original_ex_style_ &&
+        (original_ex_style_ & WS_EX_LAYERED)) {
+      SetWindowLongPtr(hwnd, GWL_EXSTYLE, original_ex_style_);
+      SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      OutputDebugString(L"[ScreenShare] Restored WS_EX_LAYERED\n");
+      original_ex_style_ = 0;
+    }
   }
 }
 
@@ -284,8 +311,9 @@ void ScreenShareOverlay::CreateToolbarWindow() {
     // Set layered window for rounded corners effect
     SetLayeredWindowAttributes(toolbar_window_, 0, 245, LWA_ALPHA);
 
-    // Exclude from screen capture
-    SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE);
+    // Note: NOT excluding from capture - WS_EX_LAYERED conflicts with
+    // WDA_EXCLUDEFROMCAPTURE The toolbar will appear in the screen share, but
+    // the main app window is excluded
 
     ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
     UpdateWindow(toolbar_window_);
@@ -319,8 +347,8 @@ void ScreenShareOverlay::CreateBorderWindows() {
       // Make window transparent except for the drawn content
       SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
 
-      // Exclude from screen capture
-      SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+      // Note: NOT excluding from capture - WS_EX_LAYERED conflicts with
+      // WDA_EXCLUDEFROMCAPTURE
 
       ShowWindow(hwnd, SW_SHOWNOACTIVATE);
       UpdateWindow(hwnd);

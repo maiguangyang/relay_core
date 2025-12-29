@@ -54,6 +54,8 @@ private:
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
   std::unique_ptr<ScreenShareOverlay> overlay_;
   HWND main_window_handle_ = nullptr; // Saved handle for window restore
+  LONG_PTR original_ex_style_ =
+      0; // Saved extended style for WS_EX_LAYERED workaround
 };
 
 // Screen Share Overlay - Creates floating toolbar and corner borders
