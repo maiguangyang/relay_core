@@ -325,12 +325,13 @@ void ScreenShareOverlay::CreateToolbarWindow() {
       nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
   if (toolbar_window_) {
-    // Set layered window for rounded corners effect
+    // Set layered window for transparency
     SetLayeredWindowAttributes(toolbar_window_, 0, 245, LWA_ALPHA);
 
-    // Note: NOT excluding from capture - WS_EX_LAYERED conflicts with
-    // WDA_EXCLUDEFROMCAPTURE The toolbar will appear in the screen share, but
-    // the main app window is excluded
+    // Create rounded corners (matching macOS 8px radius)
+    HRGN rgn =
+        CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
+    SetWindowRgn(toolbar_window_, rgn, TRUE);
 
     ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
     UpdateWindow(toolbar_window_);
@@ -380,11 +381,10 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
                                                     LPARAM lParam) {
   switch (msg) {
   case WM_CREATE: {
-    // Create stop button (positioned for 240x40 toolbar)
+    // Create stop button as OWNER DRAW for custom styling (matching macOS)
     HWND button = CreateWindowExW(
-        0, L"BUTTON", L"结束共享",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, 148, 8, 80, 26, hwnd,
-        (HMENU)ID_STOP_BUTTON, GetModuleHandle(nullptr), nullptr);
+        0, L"BUTTON", L"结束共享", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 152, 8,
+        76, 24, hwnd, (HMENU)ID_STOP_BUTTON, GetModuleHandle(nullptr), nullptr);
 
     if (button && instance_ && instance_->button_font_) {
       SendMessage(button, WM_SETFONT, (WPARAM)instance_->button_font_, TRUE);
@@ -420,7 +420,7 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
     if (instance_ && instance_->label_font_) {
       SelectObject(hdc, instance_->label_font_);
     }
-    RECT textRect = {32, 8, 145, 32};
+    RECT textRect = {32, 8, 148, 32};
     DrawTextW(hdc, L"正在共享屏幕", -1, &textRect,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
@@ -428,12 +428,34 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
     return 0;
   }
 
-  case WM_CTLCOLORBTN: {
-    // Style the stop button
-    HDC hdcBtn = (HDC)wParam;
-    SetBkColor(hdcBtn, RGB(230, 64, 77)); // Red background
-    SetTextColor(hdcBtn, RGB(255, 255, 255));
-    return (LRESULT)CreateSolidBrush(RGB(230, 64, 77));
+  case WM_DRAWITEM: {
+    // Owner-draw the stop button (red with rounded corners, matching macOS)
+    LPDRAWITEMSTRUCT lpDIS = (LPDRAWITEMSTRUCT)lParam;
+    if (lpDIS->CtlID == ID_STOP_BUTTON) {
+      HDC hdc = lpDIS->hDC;
+      RECT rc = lpDIS->rcItem;
+
+      // Red background: RGB(230, 64, 77) = macOS rgba(0.9, 0.25, 0.3, 1.0)
+      HBRUSH redBrush = CreateSolidBrush(RGB(230, 64, 77));
+
+      // Create rounded rect region (4px radius like macOS)
+      HRGN rgn = CreateRoundRectRgn(rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+      FillRgn(hdc, rgn, redBrush);
+      DeleteObject(rgn);
+      DeleteObject(redBrush);
+
+      // Draw button text
+      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(hdc, RGB(255, 255, 255));
+      if (instance_ && instance_->button_font_) {
+        SelectObject(hdc, instance_->button_font_);
+      }
+      DrawTextW(hdc, L"结束共享", -1, &rc,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+      return TRUE;
+    }
+    break;
   }
 
   case WM_COMMAND: {
