@@ -480,6 +480,11 @@ class _HomePageState extends State<HomePage> {
               !pub.muted) {
             // 本地参与者不需要检查 subscribed，远程参与者需要
             if (isLocal || pub.subscribed) {
+              // 请求最高质量的视频层（解决接收端模糊问题）
+              if (!isLocal && pub is lk.RemoteTrackPublication) {
+                pub.setVideoQuality(lk.VideoQuality.HIGH);
+                pub.setVideoFPS(30);
+              }
               _screenShareParticipant = p;
               break;
             }
@@ -685,7 +690,7 @@ class _HomePageState extends State<HomePage> {
           final track = await lk.LocalVideoTrack.createScreenShareTrack(
             lk.ScreenShareCaptureOptions(
               sourceId: result.source.id,
-              maxFrameRate: 15.0,
+              maxFrameRate: 30.0,
             ),
           );
           await _localParticipant!.publishVideoTrack(track);
@@ -1772,6 +1777,11 @@ class _HomePageState extends State<HomePage> {
           pub.subscribed &&
           pub.track != null &&
           !pub.muted) {
+        // 请求最高质量的视频层（解决接收端模糊问题）
+        if (pub is lk.RemoteTrackPublication) {
+          pub.setVideoQuality(lk.VideoQuality.HIGH);
+          pub.setVideoFPS(30);
+        }
         screenTrack = pub.track as lk.VideoTrack;
         break;
       }
