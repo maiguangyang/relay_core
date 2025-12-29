@@ -152,7 +152,7 @@ echo -e "${YELLOW}[4/5] Compiling for Windows...${NC}"
 mkdir -p $OUTPUT_DIR/windows
 if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
     CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
-    go build -ldflags="-s -w" -buildmode=c-shared -o $OUTPUT_DIR/windows/$PROJECT_NAME.dll $GO_ENTRY_POINT
+    go build -ldflags="-s -w -extldflags '-static'" -buildmode=c-shared -o $OUTPUT_DIR/windows/$PROJECT_NAME.dll $GO_ENTRY_POINT
     echo -e "${GREEN}✔ Windows build success${NC}"
 else
     echo -e "${RED}Skipping Windows (mingw not found, run: brew install mingw-w64)${NC}"
