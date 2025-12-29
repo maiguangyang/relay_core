@@ -1266,8 +1266,14 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // 如果有人在分享屏幕且已最大化，使用特刊布局
-    if (_screenShareParticipant != null && _isScreenShareMaximized) {
+    // 如果有人在分享屏幕且已最大化，使用特殊布局
+    // 但如果是本地参与者正在共享屏幕，则不显示自己的共享画面（继续显示普通会议室视图）
+    final isLocalSharing =
+        _screenShareParticipant?.identity == _localParticipant?.identity;
+
+    if (_screenShareParticipant != null &&
+        _isScreenShareMaximized &&
+        !isLocalSharing) {
       return _buildFeaturedLayout();
     }
 

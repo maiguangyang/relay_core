@@ -13,10 +13,8 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     
-    // 🔑 核心解决方案：设置窗口的 sharingType 为 none
-    // 这会让 macOS 在屏幕捕获时自动排除这个窗口
-    // 这是腾讯会议、Zoom、Teams 等专业应用使用的解决方案！
-    self.sharingType = .none
+    // 注意：不再默认设置 sharingType = .none
+    // 这样可以正常截图。只在屏幕共享期间临时设置
     
     // Register custom screen capture method channel
     let channel = FlutterMethodChannel(
@@ -38,11 +36,9 @@ class MainFlutterWindow: NSWindow {
   private func handleScreenCaptureMethod(call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "isSupported":
-      // 由于使用 sharingType = .none，所有 macOS 版本都支持自排除
       result(true)
       
     case "getSelfWindowIDs":
-      // 返回当前应用的所有窗口 ID（用于调试）
       var windowIDs: [Int] = []
       for window in NSApplication.shared.windows {
         windowIDs.append(window.windowNumber)
@@ -50,11 +46,19 @@ class MainFlutterWindow: NSWindow {
       result(windowIDs)
       
     case "showScreenShareUI":
+      // 🔑 在屏幕共享开始时，临时设置 sharingType = .none
+      // 这样在共享期间窗口不会被捕获，但平时可以正常截图
+      self.sharingType = .none
+      
       // 显示屏幕共享覆盖层（浮动控制栏 + 绿色边框 + 窗口最小化）
       ScreenShareOverlayController.shared.showScreenShareUI()
       result(true)
       
     case "hideScreenShareUI":
+      // 🔑 在屏幕共享结束时，恢复正常的 sharingType
+      // 这样可以正常截图
+      self.sharingType = .readOnly
+      
       // 隐藏屏幕共享覆盖层（恢复窗口）
       ScreenShareOverlayController.shared.hideScreenShareUI()
       result(true)
