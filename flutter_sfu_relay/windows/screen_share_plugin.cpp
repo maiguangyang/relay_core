@@ -209,19 +209,30 @@ ScreenShareOverlay::ScreenShareOverlay(
   instance_ = this;
   RegisterWindowClasses();
 
-  // Create brushes
-  toolbar_brush_ = CreateSolidBrush(RGB(38, 38, 38)); // Dark gray
-  green_brush_ = CreateSolidBrush(RGB(38, 217, 89));  // Green
+  // Create brushes - match macOS colors
+  toolbar_brush_ = CreateSolidBrush(
+      RGB(38, 38, 38)); // Dark gray: rgba(0.15, 0.15, 0.15, 0.95)
+  green_brush_ =
+      CreateSolidBrush(RGB(51, 217, 102)); // Green: rgba(0.2, 0.85, 0.4, 1.0)
 
-  // Create fonts
-  label_font_ =
-      CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                  DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei");
-  button_font_ =
-      CreateFontW(12, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                  DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei");
+  // Get DPI scale for high-DPI displays
+  HDC hdc = GetDC(nullptr);
+  int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+  ReleaseDC(nullptr, hdc);
+  int fontScale = MulDiv(dpi, 100, 96); // Scale factor in percent
+
+  // Create fonts with proper scaling (increased sizes for better readability)
+  int labelHeight = MulDiv(16, fontScale, 100);  // 16pt for label
+  int buttonHeight = MulDiv(14, fontScale, 100); // 14pt for button
+
+  label_font_ = CreateFontW(-labelHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                            FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                            DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+  button_font_ = CreateFontW(
+      -buttonHeight, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+      OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+      DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
 }
 
 ScreenShareOverlay::~ScreenShareOverlay() {
@@ -297,10 +308,11 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   // Get screen dimensions
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);
 
-  int toolbarWidth = 200;
-  int toolbarHeight = 36;
+  // Larger toolbar for better readability
+  int toolbarWidth = 240;
+  int toolbarHeight = 40;
   int x = (screenWidth - toolbarWidth) / 2;
-  int y = 45; // Distance from top
+  int y = 40; // Distance from top
 
   toolbar_window_ = CreateWindowExW(
       WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kToolbarClassName,
@@ -363,10 +375,10 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
                                                     LPARAM lParam) {
   switch (msg) {
   case WM_CREATE: {
-    // Create stop button
+    // Create stop button (positioned for 240x40 toolbar)
     HWND button = CreateWindowExW(
         0, L"BUTTON", L"结束共享",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, 118, 6, 72, 24, hwnd,
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, 148, 8, 80, 26, hwnd,
         (HMENU)ID_STOP_BUTTON, GetModuleHandle(nullptr), nullptr);
 
     if (button && instance_ && instance_->button_font_) {
@@ -387,10 +399,13 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
       FillRect(hdc, &rect, instance_->toolbar_brush_);
     }
 
-    // Draw green dot
+    // Draw larger green dot (12px diameter)
     if (instance_ && instance_->green_brush_) {
       HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, instance_->green_brush_);
-      Ellipse(hdc, 12, 12, 22, 22);
+      HPEN nullPen = (HPEN)GetStockObject(NULL_PEN);
+      HPEN oldPen = (HPEN)SelectObject(hdc, nullPen);
+      Ellipse(hdc, 14, 14, 26, 26);
+      SelectObject(hdc, oldPen);
       SelectObject(hdc, oldBrush);
     }
 
@@ -400,7 +415,7 @@ LRESULT CALLBACK ScreenShareOverlay::ToolbarWndProc(HWND hwnd, UINT msg,
     if (instance_ && instance_->label_font_) {
       SelectObject(hdc, instance_->label_font_);
     }
-    RECT textRect = {28, 9, 115, 27};
+    RECT textRect = {32, 8, 145, 32};
     DrawTextW(hdc, L"正在共享屏幕", -1, &textRect,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
