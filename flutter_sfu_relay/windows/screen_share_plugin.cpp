@@ -332,16 +332,14 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   int x = (screenWidth - toolbarWidth) / 2;
   int y = 40; // Distance from top
 
-  // Use WS_EX_LAYERED for proper transparency display
+  // Note: Removed WS_EX_LAYERED to make WDA_EXCLUDEFROMCAPTURE work.
+  // This means we lose the 96% opacity, but we can hide it from the share.
   toolbar_window_ = CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kToolbarClassName,
+      WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kToolbarClassName,
       L"Screen Share Toolbar", WS_POPUP, x, y, toolbarWidth, toolbarHeight,
       nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
   if (toolbar_window_) {
-    // Set layered window for slight transparency (245/255 = 96% opacity)
-    SetLayeredWindowAttributes(toolbar_window_, 0, 245, LWA_ALPHA);
-
     // Create rounded corners (matching macOS 8px radius)
     HRGN rgn =
         CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
@@ -392,9 +390,6 @@ void ScreenShareOverlay::CreateBorderWindows() {
     if (hwnd) {
       // Make window transparent except for the drawn content
       SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
-
-      // Exclude from screen capture (Windows 10 2004+)
-      SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
 
       ShowWindow(hwnd, SW_SHOWNOACTIVATE);
       UpdateWindow(hwnd);
