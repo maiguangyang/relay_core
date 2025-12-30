@@ -330,7 +330,7 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   int x = (screenWidth - toolbarWidth) / 2;
   int y = 40; // Distance from top
 
-  // NOTE: Do NOT use WS_EX_LAYERED - it conflicts with WDA_EXCLUDEFROMCAPTURE
+  // Create window without WS_EX_LAYERED (required for WDA_EXCLUDEFROMCAPTURE)
   toolbar_window_ = CreateWindowExW(
       WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kToolbarClassName,
       L"Screen Share Toolbar", WS_POPUP, x, y, toolbarWidth, toolbarHeight,
@@ -342,22 +342,36 @@ void ScreenShareOverlay::CreateToolbarWindow() {
         CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
     SetWindowRgn(toolbar_window_, rgn, TRUE);
 
-    // Exclude from screen capture (this is the key fix!)
-    // WDA_EXCLUDEFROMCAPTURE requires Windows 10 version 2004+
-    BOOL success = SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE);
+    // Show window first to ensure it's visible locally
+    ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
+    UpdateWindow(toolbar_window_);
+
+    // Then try to exclude from screen capture (Windows 10 2004+ required)
+    // This only affects screen capture, not local display
+    BOOL success =
+        SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE);
     if (!success) {
       DWORD error = GetLastError();
       wchar_t buf[256];
-      swprintf_s(buf,
-                 L"[ScreenShare] Toolbar SetWindowDisplayAffinity FAILED! Error: %lu\n",
-                 error);
+      swprintf_s(
+          buf,
+          L"[ScreenShare] Toolbar WDA_EXCLUDEFROMCAPTURE failed (Error: %lu). "
+          L"Toolbar will be visible in screen capture on this Windows "
+          L"version.\n",
+          error);
       OutputDebugString(buf);
+      // Note: Toolbar is still visible locally, just won't be excluded from
+      // capture
     } else {
-      OutputDebugString(L"[ScreenShare] Toolbar excluded from capture successfully\n");
+      OutputDebugString(
+          L"[ScreenShare] Toolbar excluded from capture successfully\n");
     }
-
-    ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
-    UpdateWindow(toolbar_window_);
+  } else {
+    DWORD error = GetLastError();
+    wchar_t buf[256];
+    swprintf_s(buf, L"[ScreenShare] CreateToolbarWindow FAILED! Error: %lu\n",
+               error);
+    OutputDebugString(buf);
   }
 }
 
