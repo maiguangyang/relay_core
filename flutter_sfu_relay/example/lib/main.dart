@@ -11,21 +11,57 @@ import 'package:window_manager/window_manager.dart';
 import 'pages/home_page.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // 使用 runZonedGuarded 捕获所有未处理的异步错误
+  // 这可以防止 LiveKit SDK 内部的类型转换错误导致程序卡住
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化 window_manager（桌面平台全屏功能需要）
-  if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
-    await windowManager.ensureInitialized();
-  }
+      // 设置 Flutter 框架错误处理
+      FlutterError.onError = (FlutterErrorDetails details) {
+        // 检查是否是 LiveKit SDK 的已知类型转换错误
+        final errorStr = details.exception.toString();
+        if (errorStr.contains('LocalParticipant') &&
+            errorStr.contains('RemoteParticipant')) {
+          // 忽略这个 LiveKit SDK 的已知 bug，不要让它导致程序崩溃
+          debugPrint('[LiveKit SDK Bug] Ignoring type cast error: $errorStr');
+          return;
+        }
+        // 其他错误正常处理
+        FlutterError.presentError(details);
+      };
 
-  // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
-  // Go层现在有50ms grace period来让进行中的回调完成
-  try {
-    SfuRelay.instance.cleanupAll();
-  } catch (e) {
-    print('Cleanup failed (expected on first run): $e');
-  }
-  runApp(const MyApp());
+      // 初始化 window_manager（桌面平台全屏功能需要）
+      if (!kIsWeb &&
+          (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+        await windowManager.ensureInitialized();
+      }
+
+      // 确保在启动时清理旧的 Go 回调 (防止 Hot Restart 导致的 Crash)
+      // Go层现在有50ms grace period来让进行中的回调完成
+      try {
+        SfuRelay.instance.cleanupAll();
+      } catch (e) {
+        print('Cleanup failed (expected on first run): $e');
+      }
+      runApp(const MyApp());
+    },
+    (error, stackTrace) {
+      // 全局异常处理器 - 捕获所有未处理的异步错误
+      final errorStr = error.toString();
+
+      // 忽略 LiveKit SDK 的已知类型转换 bug
+      if (errorStr.contains('LocalParticipant') &&
+          errorStr.contains('RemoteParticipant')) {
+        debugPrint('[LiveKit SDK Bug] Caught and ignored: $errorStr');
+        return;
+      }
+
+      // 其他错误打印日志
+      debugPrint('[Unhandled Error] $error');
+      debugPrint('$stackTrace');
+    },
+  );
 }
 
 class MyApp extends StatefulWidget {

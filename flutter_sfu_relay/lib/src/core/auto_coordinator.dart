@@ -170,6 +170,9 @@ class AutoCoordinator {
   final _errorController = StreamController<String>.broadcast();
   final _remoteStreamController = StreamController<MediaStream?>.broadcast();
 
+  // 是否已销毁（用于防止向已关闭的 controller 添加事件）
+  bool _disposed = false;
+
   AutoCoordinator({
     required this.roomId,
     required this.localPeerId,
@@ -330,6 +333,7 @@ class AutoCoordinator {
 
   /// 释放资源
   void dispose() {
+    _disposed = true; // 先标记为已销毁，防止后续操作添加事件
     stop();
     signaling.dispose();
     _stateController.close();
@@ -1174,7 +1178,10 @@ class AutoCoordinator {
     }
     _p2pRemoteStream = null;
     _p2pConnected = false;
-    _remoteStreamController.add(null);
+    // 检查是否已销毁，避免向已关闭的 controller 添加事件
+    if (!_disposed) {
+      _remoteStreamController.add(null);
+    }
   }
 
   /// 处理 Answer（订阅者收到 Relay 的 Answer）

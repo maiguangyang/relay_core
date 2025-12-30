@@ -2354,6 +2354,7 @@ class _LiveKitSignaling implements SignalingBridge {
 
   @override
   Future<void> disconnect() async {
+    _disposed = true; // 先设置标志，防止后续事件处理
     _listener?.dispose();
   }
 
@@ -2376,7 +2377,9 @@ class _LiveKitSignaling implements SignalingBridge {
 
   @override
   Future<void> leaveRoom(String roomId) async {
-    await _broadcast({'type': 'leave'});
+    // 注意：不要在 leaveRoom 中调用 _broadcast
+    // 因为 LiveKit SDK 在处理本地参与者发送的数据消息时会触发类型转换错误
+    // 而且即将离开房间，广播 leave 消息没有意义
     _currentRoomId = null;
   }
 
@@ -2446,6 +2449,12 @@ class _LiveKitSignaling implements SignalingBridge {
   }
 
   Future<void> _broadcast(Map<String, dynamic> data) async {
+    // 如果已经 disposed，直接返回，避免触发 LiveKit SDK 的类型转换错误
+    if (_disposed) {
+      debugPrint('[Signaling] Skipping broadcast - already disposed');
+      return;
+    }
+
     if (!_isConnected && room.connectionState != lk.ConnectionState.connected) {
       return;
     }
