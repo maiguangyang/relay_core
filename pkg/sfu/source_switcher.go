@@ -133,10 +133,12 @@ func (ss *SourceSwitcher) GetAudioTrack() *webrtc.TrackLocalStaticRTP {
 // SetVideoCodec 设置视频编解码器（从远端轨道获取完整参数）
 // 解决画质模糊问题：使用远端轨道的完整编码参数而不是默认的最小配置
 func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
+	var callback func(*webrtc.TrackLocalStaticRTP, *webrtc.TrackLocalStaticRTP)
+	var videoTrack, audioTrack *webrtc.TrackLocalStaticRTP
 
+	ss.mu.Lock()
 	if ss.closed {
+		ss.mu.Unlock()
 		return ErrForwarderClosed
 	}
 
@@ -147,14 +149,21 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 		"relay-stream",
 	)
 	if err != nil {
+		ss.mu.Unlock()
 		return err
 	}
 
 	ss.videoTrack = newTrack
+	// 复制回调和 track 引用，以便在锁外调用
+	callback = ss.onTrackChanged
+	videoTrack = ss.videoTrack
+	audioTrack = ss.audioTrack
+	ss.mu.Unlock()
 
-	// 触发回调
-	if ss.onTrackChanged != nil {
-		ss.onTrackChanged(ss.videoTrack, ss.audioTrack)
+	// 在锁外触发回调，避免死锁
+	if callback != nil {
+		fmt.Printf("[Switcher] Triggering OnTrackChanged callback for video codec: %s\n", codec.MimeType)
+		callback(videoTrack, audioTrack)
 	}
 
 	return nil
@@ -162,10 +171,12 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 
 // SetAudioCodec 设置音频编解码器（从远端轨道获取完整参数）
 func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
+	var callback func(*webrtc.TrackLocalStaticRTP, *webrtc.TrackLocalStaticRTP)
+	var videoTrack, audioTrack *webrtc.TrackLocalStaticRTP
 
+	ss.mu.Lock()
 	if ss.closed {
+		ss.mu.Unlock()
 		return ErrForwarderClosed
 	}
 
@@ -176,14 +187,21 @@ func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
 		"relay-stream",
 	)
 	if err != nil {
+		ss.mu.Unlock()
 		return err
 	}
 
 	ss.audioTrack = newTrack
+	// 复制回调和 track 引用，以便在锁外调用
+	callback = ss.onTrackChanged
+	videoTrack = ss.videoTrack
+	audioTrack = ss.audioTrack
+	ss.mu.Unlock()
 
-	// 触发回调
-	if ss.onTrackChanged != nil {
-		ss.onTrackChanged(ss.videoTrack, ss.audioTrack)
+	// 在锁外触发回调，避免死锁
+	if callback != nil {
+		fmt.Printf("[Switcher] Triggering OnTrackChanged callback for audio codec: %s\n", codec.MimeType)
+		callback(videoTrack, audioTrack)
 	}
 
 	return nil
