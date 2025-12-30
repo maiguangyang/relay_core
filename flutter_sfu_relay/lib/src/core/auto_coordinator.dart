@@ -829,10 +829,21 @@ class AutoCoordinator {
         print(
           '[AutoCoordinator] connecting native bridge to $urlPtr with token length ${botToken.length}',
         );
-        // 创建桥接器
+
+        // 1. 创建 RelayRoom (P2P 服务端)
+        final iceServersPtr = toCString('[]');
+        try {
+          bindings.RelayRoomCreate(roomPtr, iceServersPtr);
+          print('[AutoCoordinator] RelayRoom created');
+        } finally {
+          calloc.free(iceServersPtr);
+        }
+
+        // 2. 创建桥接器 (影子连接)
         bindings.LiveKitBridgeCreate(roomPtr);
         print('[AutoCoordinator] LiveKitBridgeCreate done');
-        // 连接到 LiveKit SFU (Go 层异步执行)
+
+        // 3. 连接到 LiveKit SFU (Go 层异步执行)
         bindings.LiveKitBridgeConnect(roomPtr, urlPtr, tokenPtr);
         print('[AutoCoordinator] LiveKitBridgeConnect started');
       } finally {
@@ -851,8 +862,13 @@ class AutoCoordinator {
   void _disconnectLiveKitBridge() {
     final roomPtr = toCString(roomId);
     try {
+      // 1. 断开并销毁 Bridge
       bindings.LiveKitBridgeDisconnect(roomPtr);
       bindings.LiveKitBridgeDestroy(roomPtr);
+
+      // 2. 销毁 RelayRoom
+      bindings.RelayRoomDestroy(roomPtr);
+      print('[AutoCoordinator] LiveKitBridge & RelayRoom destroyed');
     } finally {
       calloc.free(roomPtr);
     }
