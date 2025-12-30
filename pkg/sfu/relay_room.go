@@ -102,32 +102,42 @@ func WithWebRTCAPI(api *webrtc.API) RelayRoomOption {
 	}
 }
 
+// WithSourceSwitcher 使用外部的 SourceSwitcher（用于与 ProxyModeCoordinator 共享）
+// 这确保 LiveKitBridge 和 RelayRoom 使用同一个 SourceSwitcher 实例
+func WithSourceSwitcher(ss *SourceSwitcher) RelayRoomOption {
+	return func(r *RelayRoom) {
+		r.switcher = ss
+	}
+}
+
 // NewRelayRoom 创建代理房间
 func NewRelayRoom(id string, iceServers []webrtc.ICEServer, opts ...RelayRoomOption) (*RelayRoom, error) {
-	// 创建源切换器
-	switcher, err := NewSourceSwitcher(id)
-	if err != nil {
-		return nil, err
-	}
-
 	room := &RelayRoom{
 		id:          id,
-		switcher:    switcher,
 		subscribers: make(map[string]*Subscriber),
 		config: webrtc.Configuration{
 			ICEServers: iceServers,
 		},
 	}
 
-	// 监听源切换器的 Track 变更（如编码器变化）
-	switcher.SetOnTrackChanged(func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP) {
-		room.UpdateTracks(videoTrack, audioTrack)
-	})
-
-	// 应用选项
+	// 先应用选项（包括 WithSourceSwitcher）
 	for _, opt := range opts {
 		opt(room)
 	}
+
+	// 只有在没有通过选项提供 SourceSwitcher 时才创建新的
+	if room.switcher == nil {
+		switcher, err := NewSourceSwitcher(id)
+		if err != nil {
+			return nil, err
+		}
+		room.switcher = switcher
+	}
+
+	// 在 switcher 上注册回调（无论是内部创建的还是外部传入的）
+	room.switcher.SetOnTrackChanged(func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP) {
+		room.UpdateTracks(videoTrack, audioTrack)
+	})
 
 	// 如果没有设置 API，使用默认的
 	if room.api == nil {

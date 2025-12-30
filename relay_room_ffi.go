@@ -85,7 +85,16 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 		}
 	}
 
-	room, err := sfu.NewRelayRoom(goRoomID, iceServers)
+	// 准备选项 - 如果存在 Coordinator，使用其 SourceSwitcher
+	var opts []sfu.RelayRoomOption
+	if coord := getCoordinator(goRoomID); coord != nil {
+		if ss := coord.GetSourceSwitcher(); ss != nil {
+			opts = append(opts, sfu.WithSourceSwitcher(ss))
+			utils.Info("RelayRoomCreate: using Coordinator's SourceSwitcher for room %s", goRoomID)
+		}
+	}
+
+	room, err := sfu.NewRelayRoom(goRoomID, iceServers, opts...)
 	if err != nil {
 		utils.Error("Failed to create RelayRoom %s: %v", goRoomID, err)
 		return C.int(-1)

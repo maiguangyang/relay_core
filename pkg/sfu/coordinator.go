@@ -242,7 +242,8 @@ func (pmc *ProxyModeCoordinator) handleBecomeRelay() {
 
 	// 自动创建 RelayRoom（如果还没有）
 	if pmc.relayRoom == nil {
-		room, err := NewRelayRoom(pmc.roomID, nil) // TODO: 从外部传入 ICE servers
+		// 传入 Coordinator 的 SourceSwitcher，确保与 LiveKitBridge 共享同一个实例
+		room, err := NewRelayRoom(pmc.roomID, nil, WithSourceSwitcher(pmc.switcher))
 		if err == nil {
 			pmc.relayRoom = room
 			room.BecomeRelay(pmc.localPeerID)
