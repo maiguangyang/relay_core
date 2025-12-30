@@ -333,8 +333,6 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   int y = 40; // Distance from top
 
   // Use WS_EX_LAYERED for proper transparency display
-  // Note: WDA_EXCLUDEFROMCAPTURE is incompatible with WS_EX_LAYERED,
-  // so toolbar will be visible in screen capture. This is a Windows limitation.
   toolbar_window_ = CreateWindowExW(
       WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kToolbarClassName,
       L"Screen Share Toolbar", WS_POPUP, x, y, toolbarWidth, toolbarHeight,
@@ -348,6 +346,12 @@ void ScreenShareOverlay::CreateToolbarWindow() {
     HRGN rgn =
         CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
     SetWindowRgn(toolbar_window_, rgn, TRUE);
+
+    // Exclude from screen capture (Windows 10 2004+)
+    if (!SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE)) {
+      OutputDebugString(
+          L"[ScreenShare] Failed to set WDA_EXCLUDEFROMCAPTURE on toolbar\n");
+    }
 
     ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
     UpdateWindow(toolbar_window_);
@@ -389,8 +393,8 @@ void ScreenShareOverlay::CreateBorderWindows() {
       // Make window transparent except for the drawn content
       SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
 
-      // Note: NOT excluding from capture - WS_EX_LAYERED conflicts with
-      // WDA_EXCLUDEFROMCAPTURE
+      // Exclude from screen capture (Windows 10 2004+)
+      SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
 
       ShowWindow(hwnd, SW_SHOWNOACTIVATE);
       UpdateWindow(hwnd);
