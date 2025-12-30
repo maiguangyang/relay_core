@@ -11,11 +11,11 @@ package sfu
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/maiguangyang/relay_core/pkg/utils"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -428,33 +428,85 @@ func (r *RelayRoom) UpdateTracks(videoTrack, audioTrack *webrtc.TrackLocalStatic
 	}
 	r.mu.RUnlock()
 
-	fmt.Printf("[RelayRoom] UpdateTracks called, subscriber count: %d\n", len(subscribers))
+	utils.Info("[RelayRoom] UpdateTracks called, subscriber count: %d, videoTrack=%v, audioTrack=%v",
+		len(subscribers), videoTrack != nil, audioTrack != nil)
 
 	for _, sub := range subscribers {
 		sub.mu.Lock()
 		if sub.closed {
-			fmt.Printf("[RelayRoom] Subscriber %s is closed, skipping\n", sub.id)
+			utils.Info("[RelayRoom] Subscriber %s is closed, skipping", sub.id)
 			sub.mu.Unlock()
 			continue
 		}
 
+		needRenegotiate := false
+
 		// 更新视频 Track
-		if videoTrack != nil && sub.videoSender != nil {
-			if err := sub.videoSender.ReplaceTrack(videoTrack); err != nil {
-				fmt.Printf("[RelayRoom] ReplaceTrack failed for %s: %v\n", sub.id, err)
+		if videoTrack != nil {
+			if sub.videoSender != nil {
+				// 已有 sender，直接替换 track
+				if err := sub.videoSender.ReplaceTrack(videoTrack); err != nil {
+					utils.Error("[RelayRoom] ReplaceTrack failed for %s: %v", sub.id, err)
+				} else {
+					utils.Info("[RelayRoom] ReplaceTrack success for %s", sub.id)
+				}
 			} else {
-				fmt.Printf("[RelayRoom] ReplaceTrack success for %s\n", sub.id)
+				// 没有 sender，需要动态添加 track 并重协商
+				utils.Info("[RelayRoom] Adding new video track for %s (sender was nil)", sub.id)
+				sender, err := sub.pc.AddTrack(videoTrack)
+				if err != nil {
+					utils.Error("[RelayRoom] AddTrack failed for %s: %v", sub.id, err)
+				} else {
+					sub.videoSender = sender
+					needRenegotiate = true
+					// 启动 RTCP 读取
+					go r.readRTCP(sub.id, sender)
+					utils.Info("[RelayRoom] AddTrack success for %s, will renegotiate", sub.id)
+				}
 			}
-		} else {
-			fmt.Printf("[RelayRoom] Skip video ReplaceTrack for %s (videoTrack=%v, sender=%v)\n", sub.id, videoTrack != nil, sub.videoSender != nil)
 		}
 
 		// 更新音频 Track
-		if audioTrack != nil && sub.audioSender != nil {
-			sub.audioSender.ReplaceTrack(audioTrack)
+		if audioTrack != nil {
+			if sub.audioSender != nil {
+				sub.audioSender.ReplaceTrack(audioTrack)
+			} else {
+				// 动态添加音频 track
+				sender, err := sub.pc.AddTrack(audioTrack)
+				if err != nil {
+					utils.Error("[RelayRoom] AddTrack (audio) failed for %s: %v", sub.id, err)
+				} else {
+					sub.audioSender = sender
+					needRenegotiate = true
+					go r.readRTCP(sub.id, sender)
+				}
+			}
 		}
 
+		peerID := sub.id
+		pc := sub.pc
 		sub.mu.Unlock()
+
+		// 如果需要重协商，创建新的 Offer 并通知 Dart 层
+		if needRenegotiate {
+			utils.Info("[RelayRoom] Triggering renegotiation for %s", peerID)
+			offer, err := pc.CreateOffer(nil)
+			if err != nil {
+				utils.Error("[RelayRoom] CreateOffer failed for %s: %v", peerID, err)
+				continue
+			}
+
+			if err := pc.SetLocalDescription(offer); err != nil {
+				utils.Error("[RelayRoom] SetLocalDescription failed for %s: %v", peerID, err)
+				continue
+			}
+
+			// 通知 Dart 层发送新的 Offer 给订阅者
+			if r.onNeedRenegotiate != nil {
+				r.onNeedRenegotiate(r.id, peerID, offer.SDP)
+				utils.Info("[RelayRoom] Sent renegotiation offer to %s", peerID)
+			}
+		}
 	}
 }
 
