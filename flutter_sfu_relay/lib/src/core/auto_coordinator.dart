@@ -962,6 +962,9 @@ class AutoCoordinator {
         // Relay 生成了面向订阅者的 ICE 候选，通过信令发送给订阅者
         if (event.data != null && event.peerId.isNotEmpty) {
           // event.data 是 JSON String，直接发送
+          print(
+            '[Relay] Forwarding ICE candidate to subscriber: ${event.peerId}',
+          );
           signaling.sendCandidate(roomId, event.peerId, event.data!);
         }
         break;
@@ -1121,12 +1124,14 @@ class AutoCoordinator {
       _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) {
         print('[P2P] Connection state: $state');
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          print('[P2P] Remote stream connected! Ready to render.');
           _p2pConnected = true;
         } else if (state ==
                 RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
             state ==
                 RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
             state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+          print('[P2P] Remote stream disconnected or failed: $state');
           _p2pConnected = false;
           _p2pRemoteStream = null;
           _remoteStreamController.add(null);
@@ -1191,6 +1196,7 @@ class AutoCoordinator {
         map['sdpMid'],
         map['sdpMLineIndex'],
       );
+      print('[P2P] Adding ICE candidate from Relay: ${candidate.candidate}');
       await _p2pConnection!.addCandidate(candidate);
     } catch (e) {
       print('[P2P] Failed to add ICE candidate: $e');
@@ -1256,6 +1262,7 @@ class AutoCoordinator {
       final roomPtr = toCString(roomId);
       final peerPtr = toCString(subscriberId);
       final candidatePtr = toCString(candidateJsonStr);
+      print('[Relay] Adding ICE candidate from Subscriber: $subscriberId');
 
       try {
         bindings.RelayRoomAddICECandidate(roomPtr, peerPtr, candidatePtr);
