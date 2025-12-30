@@ -332,44 +332,27 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   int x = (screenWidth - toolbarWidth) / 2;
   int y = 40; // Distance from top
 
-  // Create OPAQUE window (no WS_EX_LAYERED) to allow WDA_EXCLUDEFROMCAPTURE
-  // Trade-off: No transparency effect, but toolbar will be hidden from screen
-  // capture
+  // Use WS_EX_LAYERED for proper transparency display
+  // Note: WDA_EXCLUDEFROMCAPTURE is incompatible with WS_EX_LAYERED,
+  // so toolbar will be visible in screen capture. This is a Windows limitation.
   toolbar_window_ = CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kToolbarClassName,
+      WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kToolbarClassName,
       L"Screen Share Toolbar", WS_POPUP, x, y, toolbarWidth, toolbarHeight,
       nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
   if (toolbar_window_) {
+    // Set layered window for slight transparency (245/255 = 96% opacity)
+    SetLayeredWindowAttributes(toolbar_window_, 0, 245, LWA_ALPHA);
+
     // Create rounded corners (matching macOS 8px radius)
     HRGN rgn =
         CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
     SetWindowRgn(toolbar_window_, rgn, TRUE);
 
-    // Show window first
     ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
     UpdateWindow(toolbar_window_);
 
-    // Force window to repaint with correct background
-    InvalidateRect(toolbar_window_, nullptr, TRUE);
-
-    // Now apply WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+ required)
-    // This hides the toolbar from screen capture while keeping it visible
-    // locally
-    BOOL success =
-        SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE);
-    if (!success) {
-      DWORD error = GetLastError();
-      wchar_t buf[256];
-      swprintf_s(buf,
-                 L"[ScreenShare] WDA_EXCLUDEFROMCAPTURE failed (Error: %lu). "
-                 L"Toolbar will be visible in capture.\n",
-                 error);
-      OutputDebugString(buf);
-    } else {
-      OutputDebugString(
-          L"[ScreenShare] Toolbar created and excluded from capture\n");
-    }
+    OutputDebugString(L"[ScreenShare] Toolbar window created successfully\n");
   } else {
     DWORD error = GetLastError();
     wchar_t buf[256];
