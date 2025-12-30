@@ -118,6 +118,11 @@ func NewRelayRoom(id string, iceServers []webrtc.ICEServer, opts ...RelayRoomOpt
 		},
 	}
 
+	// 监听源切换器的 Track 变更（如编码器变化）
+	switcher.SetOnTrackChanged(func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP) {
+		room.UpdateTracks(videoTrack, audioTrack)
+	})
+
 	// 应用选项
 	for _, opt := range opts {
 		opt(room)

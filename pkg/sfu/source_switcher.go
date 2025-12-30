@@ -69,6 +69,7 @@ type SourceSwitcher struct {
 
 	// 回调
 	onSourceChanged func(roomID string, sourceType SourceType, sharerID string)
+	onTrackChanged  func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP)
 
 	closed bool
 }
@@ -112,6 +113,13 @@ func (ss *SourceSwitcher) SetOnSourceChanged(fn func(roomID string, sourceType S
 	ss.onSourceChanged = fn
 }
 
+// SetOnTrackChanged 设置 Track 变更回调
+func (ss *SourceSwitcher) SetOnTrackChanged(fn func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP)) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.onTrackChanged = fn
+}
+
 // GetVideoTrack 返回视频 Track 供订阅者使用
 func (ss *SourceSwitcher) GetVideoTrack() *webrtc.TrackLocalStaticRTP {
 	return ss.videoTrack
@@ -143,6 +151,12 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	}
 
 	ss.videoTrack = newTrack
+
+	// 触发回调
+	if ss.onTrackChanged != nil {
+		ss.onTrackChanged(ss.videoTrack, ss.audioTrack)
+	}
+
 	return nil
 }
 
@@ -166,6 +180,12 @@ func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
 	}
 
 	ss.audioTrack = newTrack
+
+	// 触发回调
+	if ss.onTrackChanged != nil {
+		ss.onTrackChanged(ss.videoTrack, ss.audioTrack)
+	}
+
 	return nil
 }
 
