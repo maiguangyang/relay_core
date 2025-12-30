@@ -232,8 +232,8 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 		go r.readRTCP(peerID, sender)
 	}
 
-	// 设置事件处理
-	r.setupSubscriberHandlers(sub)
+	// 设置 ICE 处理 (必须在 SetLocalDescription 之前)
+	r.setupICEHandlers(sub)
 
 	// 处理 Offer
 	offer := webrtc.SessionDescription{
@@ -257,6 +257,9 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 		pc.Close()
 		return "", err
 	}
+
+	// 初始连接完成后，设置协商处理器
+	r.setupNegotiationHandlers(sub)
 
 	// 注册订阅者
 	r.mu.Lock()
@@ -509,8 +512,8 @@ func (r *RelayRoom) Close() error {
 	return nil
 }
 
-// setupSubscriberHandlers 设置订阅者的事件处理器
-func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
+// setupICEHandlers 设置 ICE 相关处理器
+func (r *RelayRoom) setupICEHandlers(sub *Subscriber) {
 	// ICE 候选生成
 	sub.pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
@@ -541,12 +544,21 @@ func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
 			r.emitError(sub.id, ErrICEFailed)
 		}
 	})
+}
 
+// setupNegotiationHandlers 设置协商处理器
+func (r *RelayRoom) setupNegotiationHandlers(sub *Subscriber) {
 	// 协商需求（Track 变化时触发）
 	sub.pc.OnNegotiationNeeded(func() {
 		// 创建新 Offer 并通知 Dart 层
 		sub.mu.Lock()
 		if sub.closed {
+			sub.mu.Unlock()
+			return
+		}
+
+		// 检查状态，避免 Glare
+		if sub.pc.SignalingState() != webrtc.SignalingStateStable {
 			sub.mu.Unlock()
 			return
 		}
@@ -565,6 +577,12 @@ func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
 
 		r.emitNeedRenegotiate(sub.id, offer.SDP)
 	})
+}
+
+// Deprecated: setupSubscriberHandlers is split into setupICEHandlers and setupNegotiationHandlers
+func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
+	r.setupICEHandlers(sub)
+	r.setupNegotiationHandlers(sub)
 }
 
 // readRTCP 读取 RTCP 反馈
