@@ -10,11 +10,11 @@
 package sfu
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/maiguangyang/relay_core/pkg/utils"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -162,7 +162,7 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 
 	// 在锁外触发回调，避免死锁
 	if callback != nil {
-		fmt.Printf("[Switcher] Triggering OnTrackChanged callback for video codec: %s\n", codec.MimeType)
+		utils.Info("[Switcher] Triggering OnTrackChanged callback for video codec: %s", codec.MimeType)
 		callback(videoTrack, audioTrack)
 	}
 
@@ -200,7 +200,7 @@ func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
 
 	// 在锁外触发回调，避免死锁
 	if callback != nil {
-		fmt.Printf("[Switcher] Triggering OnTrackChanged callback for audio codec: %s\n", codec.MimeType)
+		utils.Info("[Switcher] Triggering OnTrackChanged callback for audio codec: %s", codec.MimeType)
 		callback(videoTrack, audioTrack)
 	}
 
@@ -279,7 +279,7 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 
 	// 写入 Track（转发给所有订阅者）
 	if err := track.WriteRTP(packet); err != nil {
-		fmt.Printf("[Switcher] WriteRTP error: %v (isVideo: %v)\n", err, isVideo)
+		utils.Error("[Switcher] WriteRTP error: %v (isVideo: %v)", err, isVideo)
 		return err
 	}
 

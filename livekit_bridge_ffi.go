@@ -16,10 +16,10 @@ import "C"
 
 import (
 	"encoding/json"
-	"fmt"
 	"unsafe"
 
 	"github.com/maiguangyang/relay_core/pkg/sfu"
+	"github.com/maiguangyang/relay_core/pkg/utils"
 )
 
 // ========================================
@@ -39,17 +39,17 @@ func LiveKitBridgeCreate(roomID *C.char) C.int {
 	var switcher *sfu.SourceSwitcher
 	if coord != nil {
 		switcher = coord.GetSourceSwitcher()
-		fmt.Printf("[BridgeFFI] Got SourceSwitcher from Coordinator for room %s: %v\n", rid, switcher != nil)
+		utils.Info("[BridgeFFI] Got SourceSwitcher from Coordinator for room %s: %v", rid, switcher != nil)
 	}
 
 	if switcher == nil {
 		// 尝试获取独立的 SourceSwitcher (来自 RelayRoomCreate 注册的)
 		switcher = getSourceSwitcher(rid)
-		fmt.Printf("[BridgeFFI] Got SourceSwitcher from registry for room %s: %v\n", rid, switcher != nil)
+		utils.Info("[BridgeFFI] Got SourceSwitcher from registry for room %s: %v", rid, switcher != nil)
 	}
 
 	if switcher == nil {
-		fmt.Printf("[BridgeFFI] WARNING: No SourceSwitcher found for room %s, ReplaceTrack will NOT work!\n", rid)
+		utils.Error("[BridgeFFI] WARNING: No SourceSwitcher found for room %s, ReplaceTrack will NOT work!", rid)
 	}
 
 	// 创建桥接器
