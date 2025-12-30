@@ -10,6 +10,7 @@
 package sfu
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -240,7 +241,12 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 
 	// 写入 Track（转发给所有订阅者）
 	if err := track.WriteRTP(packet); err != nil {
+		fmt.Printf("[Switcher] WriteRTP error: %v (isVideo: %v)\n", err, isVideo)
 		return err
+	}
+
+	if ss.packetsFromSFU%100 == 0 {
+		// fmt.Printf("[Switcher] Wrote packet to track (isVideo: %v, fromSFU: %v)\n", isVideo, fromSFU)
 	}
 
 	// 更新统计
