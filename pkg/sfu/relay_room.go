@@ -11,6 +11,7 @@ package sfu
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -427,16 +428,25 @@ func (r *RelayRoom) UpdateTracks(videoTrack, audioTrack *webrtc.TrackLocalStatic
 	}
 	r.mu.RUnlock()
 
+	fmt.Printf("[RelayRoom] UpdateTracks called, subscriber count: %d\n", len(subscribers))
+
 	for _, sub := range subscribers {
 		sub.mu.Lock()
 		if sub.closed {
+			fmt.Printf("[RelayRoom] Subscriber %s is closed, skipping\n", sub.id)
 			sub.mu.Unlock()
 			continue
 		}
 
 		// 更新视频 Track
 		if videoTrack != nil && sub.videoSender != nil {
-			sub.videoSender.ReplaceTrack(videoTrack)
+			if err := sub.videoSender.ReplaceTrack(videoTrack); err != nil {
+				fmt.Printf("[RelayRoom] ReplaceTrack failed for %s: %v\n", sub.id, err)
+			} else {
+				fmt.Printf("[RelayRoom] ReplaceTrack success for %s\n", sub.id)
+			}
+		} else {
+			fmt.Printf("[RelayRoom] Skip video ReplaceTrack for %s (videoTrack=%v, sender=%v)\n", sub.id, videoTrack != nil, sub.videoSender != nil)
 		}
 
 		// 更新音频 Track
