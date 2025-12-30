@@ -364,14 +364,22 @@ class _HomePageState extends State<HomePage> {
           _p2pVideoRenderer!.srcObject = stream;
           _p2pRemoteStream = stream;
           if (mounted) {
-            setState(() => _hasP2PVideo = true);
+            setState(() {
+              _hasP2PVideo = true;
+              // P2P 连接建立，重新配置画质（暂停 SFU 订阅）
+              _updateParticipants();
+            });
           }
         } else {
           debugPrint('[P2P] Remote stream disconnected');
           _p2pVideoRenderer?.srcObject = null;
           _p2pRemoteStream = null;
           if (mounted) {
-            setState(() => _hasP2PVideo = false);
+            setState(() {
+              _hasP2PVideo = false;
+              // P2P 断开，恢复 SFU 订阅
+              _updateParticipants();
+            });
           }
         }
       });
@@ -483,6 +491,37 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _configureVideoQuality(lk.RemoteTrackPublication pub) {
+    // 优化：如果有 P2P 视频流，则关闭 SFU 直连订阅以节省带宽
+    if (_hasP2PVideo) {
+      if (pub.subscribed) {
+        debugPrint('[VideoQuality] P2P active, unsubscribing SFU track');
+        pub.unsubscribe();
+      }
+      return;
+    }
+
+    // 如果没有 P2P 但未订阅，则恢复订阅
+    if (!pub.subscribed) {
+      debugPrint('[VideoQuality] P2P inactive, subscribing SFU track');
+      pub.subscribe();
+    }
+
+    // 根据网络状况配置画质
+    if (_lastConnectionType == ConnectionType.cellular) {
+      // 蜂窝网络：节省流量 (MEDIUM + 15FPS)
+      debugPrint('[VideoQuality] Configuring for Cellular: MEDIUM, 15FPS');
+      pub.setVideoQuality(lk.VideoQuality.MEDIUM);
+      pub.setVideoFPS(15);
+    } else {
+      // WiFi/有线/未知：高质量 (HIGH + 60FPS)
+      // 在局域网 Relay 场景下，大部分情况应使用最高画质
+      debugPrint('[VideoQuality] Configuring for WiFi/Ethernet: HIGH, 60FPS');
+      pub.setVideoQuality(lk.VideoQuality.HIGH);
+      pub.setVideoFPS(60);
+    }
+  }
+
   void _updateParticipants() {
     if (!mounted || _room == null) return;
 
@@ -511,14 +550,14 @@ class _HomePageState extends State<HomePage> {
         final isLocal = p.identity == _localParticipant?.identity;
         for (final pub in p.videoTrackPublications) {
           if (pub.source == lk.TrackSource.screenShareVideo &&
-              pub.track != null &&
-              !pub.muted) {
+              !pub.muted &&
+              (pub.track != null || _hasP2PVideo)) {
             // 本地参与者不需要检查 subscribed，远程参与者需要
-            if (isLocal || pub.subscribed) {
-              // 请求最高质量的视频层（解决接收端模糊问题）
+            // 如果有 P2P 连接，即使未订阅 SFU 也视为有效
+            if (isLocal || pub.subscribed || _hasP2PVideo) {
+              // 根据网络状况请求合适的画质
               if (!isLocal && pub is lk.RemoteTrackPublication) {
-                pub.setVideoQuality(lk.VideoQuality.HIGH);
-                pub.setVideoFPS(60);
+                _configureVideoQuality(pub);
               }
               _screenShareParticipant = p;
               break;
@@ -904,14 +943,14 @@ class _HomePageState extends State<HomePage> {
     lk.VideoTrack? screenTrack;
     for (final pub in screenSharer.videoTrackPublications) {
       if (pub.source == lk.TrackSource.screenShareVideo &&
-          pub.subscribed &&
-          pub.track != null &&
-          !pub.muted) {
+          !pub.muted &&
+          (pub.subscribed || _hasP2PVideo || isSharerLocal)) {
         if (pub is lk.RemoteTrackPublication) {
-          pub.setVideoQuality(lk.VideoQuality.HIGH);
-          pub.setVideoFPS(60);
+          _configureVideoQuality(pub);
         }
-        screenTrack = pub.track as lk.VideoTrack;
+        if (pub.track != null) {
+          screenTrack = pub.track as lk.VideoTrack;
+        }
         break;
       }
     }
@@ -2010,15 +2049,15 @@ class _HomePageState extends State<HomePage> {
     lk.VideoTrack? screenTrack;
     for (final pub in screenSharer.videoTrackPublications) {
       if (pub.source == lk.TrackSource.screenShareVideo &&
-          pub.subscribed &&
-          pub.track != null &&
-          !pub.muted) {
-        // 请求最高质量的视频层（解决接收端模糊问题）
+          !pub.muted &&
+          (pub.subscribed || _hasP2PVideo || isSharerLocal)) {
+        // 根据网络状况请求合适的画质
         if (pub is lk.RemoteTrackPublication) {
-          pub.setVideoQuality(lk.VideoQuality.HIGH);
-          pub.setVideoFPS(60);
+          _configureVideoQuality(pub);
         }
-        screenTrack = pub.track as lk.VideoTrack;
+        if (pub.track != null) {
+          screenTrack = pub.track as lk.VideoTrack;
+        }
         break;
       }
     }
