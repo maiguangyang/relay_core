@@ -152,6 +152,7 @@ func (b *LiveKitBridge) onTrackSubscribed(
 	rp *lksdk.RemoteParticipant,
 ) {
 	atomic.AddInt32(&b.tracksSubscribed, 1)
+	fmt.Printf("[Bridge] Track subscribed: %s (kind: %s, participant: %s)\n", track.ID(), track.Kind().String(), rp.Identity())
 
 	isVideo := track.Kind() == webrtc.RTPCodecTypeVideo
 
@@ -205,10 +206,14 @@ func (b *LiveKitBridge) readRTPLoop(track *webrtc.TrackRemote, isVideo bool, par
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			// 轨道结束或连接断开
+			fmt.Printf("[Bridge] ReadRTP error for track %s: %v\n", track.ID(), err)
 			return
 		}
 
 		packetCount++
+		if packetCount == 1 {
+			fmt.Printf("[Bridge] First RTP packet received for track %s\n", track.ID())
+		}
 
 		// 每 100 个包打印一次
 		if packetCount%100 == 1 {
