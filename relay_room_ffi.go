@@ -133,6 +133,8 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 	)
 
 	registerRelayRoom(goRoomID, room)
+	// 注册 SourceSwitcher，让 LiveKitBridge 能够获取到同一个实例
+	registerSourceSwitcher(goRoomID, room.GetSourceSwitcher())
 	utils.Info("RelayRoom created: %s", goRoomID)
 	return C.int(0)
 }
