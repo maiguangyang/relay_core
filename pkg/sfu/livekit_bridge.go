@@ -112,6 +112,13 @@ func (b *LiveKitBridge) Connect(url, token string) error {
 		ParticipantCallback: lksdk.ParticipantCallback{
 			OnTrackSubscribed:   b.onTrackSubscribed,
 			OnTrackUnsubscribed: b.onTrackUnsubscribed,
+			OnTrackPublished: func(pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
+				fmt.Printf("[Bridge] Track published: %s (kind: %s, source: %s, participant: %s)\n", pub.SID(), pub.Kind(), pub.Source(), rp.Identity())
+				if !pub.IsSubscribed() {
+					fmt.Printf("[Bridge] Track %s not subscribed, attempting manual subscription\n", pub.SID())
+					pub.SetSubscribed(true)
+				}
+			},
 		},
 		OnDisconnected: func() {
 			b.handleDisconnected()
@@ -125,7 +132,8 @@ func (b *LiveKitBridge) Connect(url, token string) error {
 	}
 
 	// 连接到房间
-	room, err := lksdk.ConnectToRoomWithToken(url, token, roomCB)
+	// 连接到房间，启用自动订阅
+	room, err := lksdk.ConnectToRoomWithToken(url, token, roomCB, lksdk.WithAutoSubscribe(true))
 	if err != nil {
 		b.mu.Lock()
 		b.state = LiveKitBridgeStateFailed
