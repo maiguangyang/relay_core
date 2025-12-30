@@ -8,6 +8,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:window_manager/window_manager.dart';
@@ -81,6 +82,13 @@ class _HomePageState extends State<HomePage> {
   // 网络变化监听
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   ConnectionType? _lastConnectionType;
+
+  // P2P 远程视频流（从 Relay 接收）
+  RTCVideoRenderer? _p2pVideoRenderer;
+  // ignore: unused_field - kept for debugging and future extensions
+  MediaStream? _p2pRemoteStream;
+  StreamSubscription<MediaStream?>? _p2pStreamSubscription;
+  bool _hasP2PVideo = false;
 
   @override
   void initState() {
@@ -344,6 +352,30 @@ class _HomePageState extends State<HomePage> {
       // 5. 启动
       await _autoCoord!.start();
 
+      // 6. 监听 P2P 远程流（局域网订阅者从 Relay 接收视频）
+      _p2pStreamSubscription = _autoCoord!.onRemoteStream.listen((
+        stream,
+      ) async {
+        if (stream != null) {
+          debugPrint('[P2P] Received remote stream from Relay');
+          // 初始化视频渲染器
+          _p2pVideoRenderer ??= RTCVideoRenderer();
+          await _p2pVideoRenderer!.initialize();
+          _p2pVideoRenderer!.srcObject = stream;
+          _p2pRemoteStream = stream;
+          if (mounted) {
+            setState(() => _hasP2PVideo = true);
+          }
+        } else {
+          debugPrint('[P2P] Remote stream disconnected');
+          _p2pVideoRenderer?.srcObject = null;
+          _p2pRemoteStream = null;
+          if (mounted) {
+            setState(() => _hasP2PVideo = false);
+          }
+        }
+      });
+
       setState(() {
         _isConnecting = false;
         _isInMeeting = true;
@@ -585,6 +617,15 @@ class _HomePageState extends State<HomePage> {
       _room = null;
     }
     _localParticipant = null;
+
+    // 4. 清理 P2P 视频渲染器
+    _p2pStreamSubscription?.cancel();
+    _p2pStreamSubscription = null;
+    _p2pVideoRenderer?.srcObject = null;
+    _p2pVideoRenderer?.dispose();
+    _p2pVideoRenderer = null;
+    _p2pRemoteStream = null;
+    _hasP2PVideo = false;
 
     // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
     await Future.delayed(const Duration(milliseconds: 2000));
@@ -1910,6 +1951,43 @@ class _HomePageState extends State<HomePage> {
     return name.substring(0, name.length.clamp(0, 1)).toUpperCase();
   }
 
+  /// 构建屏幕共享视频渲染器
+  /// 优先使用 P2P 流（局域网订阅者），否则使用 LiveKit 直连流
+  Widget _buildScreenShareRenderer(
+    lk.VideoTrack? screenTrack,
+    bool isSharerLocal,
+  ) {
+    // 如果是本地分享，直接用 LiveKit 渲染器
+    if (isSharerLocal && screenTrack != null) {
+      return lk.VideoTrackRenderer(screenTrack);
+    }
+
+    // 如果有 P2P 连接且不是 Relay，优先使用 P2P 视频
+    final isRelay = _autoCoord?.isRelay ?? false;
+    final isOnLan =
+        _lastConnectionType == ConnectionType.ethernet ||
+        _lastConnectionType == ConnectionType.wifi;
+
+    if (_hasP2PVideo && _p2pVideoRenderer != null && !isRelay && isOnLan) {
+      debugPrint('[Render] Using P2P video stream from Relay');
+      return RTCVideoView(
+        _p2pVideoRenderer!,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+      );
+    }
+
+    // Fallback: 使用 LiveKit 直连流
+    if (screenTrack != null) {
+      debugPrint('[Render] Using LiveKit direct stream (fallback)');
+      return lk.VideoTrackRenderer(screenTrack);
+    }
+
+    // 无视频
+    return const Center(
+      child: Icon(Icons.screen_share, size: 64, color: Colors.white30),
+    );
+  }
+
   /// 特刊布局：屏幕共享者放大显示
   Widget _buildFeaturedLayout() {
     final screenSharer = _screenShareParticipant!;
@@ -1932,6 +2010,9 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
+    // 构建视频渲染器：优先使用 P2P 流（局域网订阅者）
+    final videoRenderer = _buildScreenShareRenderer(screenTrack, isSharerLocal);
+
     // 全屏模式
     if (_isScreenShareFullscreen) {
       return GestureDetector(
@@ -1941,24 +2022,15 @@ class _HomePageState extends State<HomePage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 全屏视频
-              if (screenTrack != null)
-                FittedBox(
-                  fit: BoxFit.contain,
-                  child: SizedBox(
-                    width: 1920,
-                    height: 1080,
-                    child: lk.VideoTrackRenderer(screenTrack),
-                  ),
-                )
-              else
-                const Center(
-                  child: Icon(
-                    Icons.screen_share,
-                    size: 64,
-                    color: Colors.white30,
-                  ),
+              // 全屏视频 - 优先使用 P2P 流
+              FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: 1920,
+                  height: 1080,
+                  child: videoRenderer,
                 ),
+              ),
               // 退出全屏按钮
               Positioned(
                 top: 16,
@@ -2047,30 +2119,18 @@ class _HomePageState extends State<HomePage> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // 屏幕共享视频 - 使用 FittedBox 确保完整显示
-                      if (screenTrack != null)
-                        Container(
-                          color: Colors.black,
-                          child: FittedBox(
-                            fit: BoxFit.contain,
-                            child: SizedBox(
-                              width: 1920,
-                              height: 1080,
-                              child: lk.VideoTrackRenderer(screenTrack),
-                            ),
-                          ),
-                        )
-                      else
-                        Container(
-                          color: AppTheme.cardDark,
-                          child: const Center(
-                            child: Icon(
-                              Icons.screen_share,
-                              size: 48,
-                              color: AppTheme.textSecondary,
-                            ),
+                      // 屏幕共享视频 - 优先使用 P2P 流
+                      Container(
+                        color: Colors.black,
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: SizedBox(
+                            width: 1920,
+                            height: 1080,
+                            child: videoRenderer,
                           ),
                         ),
+                      ),
                       // 分享者标签
                       Positioned(
                         bottom: 12,

@@ -4,6 +4,10 @@
 library;
 
 import 'dart:async';
+import 'dart:ffi';
+
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:ffi/ffi.dart';
 
 import '../bindings/bindings.dart';
 import '../bindings/utils.dart';
@@ -11,8 +15,6 @@ import '../callbacks/callbacks.dart';
 import '../enums.dart';
 import '../signaling/signaling.dart';
 import 'coordinator.dart';
-
-import 'package:ffi/ffi.dart';
 
 /// Bot Token 请求回调类型
 /// 当设备当选为 Relay 时调用，返回 Bot Token 用于影子连接
@@ -154,12 +156,18 @@ class AutoCoordinator {
   StreamSubscription<String>? _peerDisconnectedSubscription;
   StreamSubscription<String>? _peerConnectedSubscription;
 
+  // P2P 订阅者连接（当本机不是 Relay 且在局域网时使用）
+  RTCPeerConnection? _p2pConnection;
+  MediaStream? _p2pRemoteStream;
+  bool _p2pConnected = false;
+
   // 事件流
   final _stateController = StreamController<AutoCoordinatorState>.broadcast();
   final _relayChangedController = StreamController<String>.broadcast();
   final _peerJoinedController = StreamController<String>.broadcast();
   final _peerLeftController = StreamController<String>.broadcast();
   final _errorController = StreamController<String>.broadcast();
+  final _remoteStreamController = StreamController<MediaStream?>.broadcast();
 
   AutoCoordinator({
     required this.roomId,
@@ -203,12 +211,23 @@ class AutoCoordinator {
   /// 房间内所有 Peer
   Set<String> get peers => Set.unmodifiable(_peers);
 
+  /// P2P 远程视频流（订阅者从 Relay 接收的视频）
+  /// 只有局域网订阅者才会有此流，蜂窝网络设备为 null
+  MediaStream? get p2pRemoteStream => _p2pRemoteStream;
+
+  /// P2P 连接是否已建立
+  bool get hasP2PConnection => _p2pConnected && _p2pRemoteStream != null;
+
   // ========== 事件流 ==========
 
   Stream<AutoCoordinatorState> get onStateChanged => _stateController.stream;
   Stream<String> get onRelayChanged => _relayChangedController.stream;
   Stream<String> get onPeerJoined => _peerJoinedController.stream;
   Stream<String> get onPeerLeft => _peerLeftController.stream;
+
+  /// P2P 远程流变化事件
+  /// 当 P2P 连接建立或断开时触发
+  Stream<MediaStream?> get onRemoteStream => _remoteStreamController.stream;
   Stream<String> get onError => _errorController.stream;
 
   // ========== 生命周期 ==========
@@ -298,6 +317,9 @@ class AutoCoordinator {
       await signaling.leaveRoom(roomId);
     } catch (_) {}
 
+    // 断开 P2P 订阅者连接
+    await _closeP2PConnection();
+
     _peers.clear();
     _currentRelay = null;
     _electionFailureCount = 0;
@@ -314,6 +336,7 @@ class AutoCoordinator {
     _peerJoinedController.close();
     _peerLeftController.close();
     _errorController.close();
+    _remoteStreamController.close();
   }
 
   // ========== 公开方法 ==========
@@ -540,6 +563,34 @@ class AutoCoordinator {
         _handleRelayChanged(message.data);
         break;
 
+      case SignalingMessageType.offer:
+        // Relay 收到订阅者的 Offer（Go 层 RelayRoom 处理）
+        _handleOfferFromSubscriber(message.peerId, message.data);
+        break;
+
+      case SignalingMessageType.answer:
+        // 订阅者收到 Relay 的 Answer
+        if (message.data != null && message.data!['sdp'] != null) {
+          _handleP2PAnswer(message.peerId, message.data!['sdp'] as String);
+        }
+        break;
+
+      case SignalingMessageType.candidate:
+        // 收到 ICE 候选
+        if (message.data != null) {
+          if (isRelay) {
+            // Relay 收到订阅者的 ICE 候选
+            _handleCandidateFromSubscriber(message.peerId, message.data);
+          } else if (message.data!['candidate'] != null) {
+            // 订阅者收到 Relay 的 ICE 候选
+            _handleP2PCandidate(
+              message.peerId,
+              message.data!['candidate'] as String,
+            );
+          }
+        }
+        break;
+
       default:
         break;
     }
@@ -715,6 +766,11 @@ class AutoCoordinator {
     // 无论当前是 electing 还是 asRelay，都需要更新
     if (_state != AutoCoordinatorState.idle) {
       _updateState(AutoCoordinatorState.connected);
+    }
+
+    // 局域网订阅者：创建到 Relay 的 P2P 连接
+    if (isOnLan && !isRelay) {
+      _createP2PConnectionToRelay(relayId);
     }
   }
 
@@ -989,5 +1045,194 @@ class AutoCoordinator {
 
   void _broadcastClaim() {
     signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
+  }
+
+  // ========== P2P 订阅者连接 ==========
+
+  /// 创建到 Relay 的 P2P 连接（订阅者使用）
+  Future<void> _createP2PConnectionToRelay(String relayId) async {
+    // 只有局域网设备才能使用 P2P
+    if (!isOnLan) {
+      print('[P2P] Not on LAN, skipping P2P connection');
+      return;
+    }
+
+    // Relay 不需要创建 P2P 连接
+    if (isRelay) return;
+
+    // 如果已有连接，先关闭
+    await _closeP2PConnection();
+
+    try {
+      final configuration = <String, dynamic>{
+        'iceServers': [
+          {'urls': 'stun:stun.l.google.com:19302'},
+        ],
+        'sdpSemantics': 'unified-plan',
+      };
+
+      _p2pConnection = await createPeerConnection(configuration);
+
+      // 添加收发器以接收视频和音频
+      await _p2pConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+      await _p2pConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+
+      // 监听远程流
+      _p2pConnection!.onTrack = (RTCTrackEvent event) {
+        if (event.streams.isNotEmpty) {
+          _p2pRemoteStream = event.streams.first;
+          _remoteStreamController.add(_p2pRemoteStream);
+          print('[P2P] Received remote stream from Relay');
+        }
+      };
+
+      // 监听连接状态
+      _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) {
+        print('[P2P] Connection state: $state');
+        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          _p2pConnected = true;
+        } else if (state ==
+                RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+            state ==
+                RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+            state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+          _p2pConnected = false;
+          _p2pRemoteStream = null;
+          _remoteStreamController.add(null);
+        }
+      };
+
+      // 监听 ICE 候选
+      _p2pConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+        signaling.sendCandidate(roomId, relayId, candidate.toMap().toString());
+      };
+
+      // 创建 Offer
+      final offer = await _p2pConnection!.createOffer();
+      await _p2pConnection!.setLocalDescription(offer);
+
+      // 发送 Offer 给 Relay
+      signaling.sendOffer(roomId, relayId, offer.sdp!);
+      print('[P2P] Sent offer to Relay: $relayId');
+    } catch (e) {
+      print('[P2P] Failed to create P2P connection: $e');
+      _errorController.add('P2P connection failed: $e');
+    }
+  }
+
+  /// 关闭 P2P 连接
+  Future<void> _closeP2PConnection() async {
+    if (_p2pConnection != null) {
+      await _p2pConnection!.close();
+      _p2pConnection = null;
+    }
+    _p2pRemoteStream = null;
+    _p2pConnected = false;
+    _remoteStreamController.add(null);
+  }
+
+  /// 处理 Answer（订阅者收到 Relay 的 Answer）
+  Future<void> _handleP2PAnswer(String peerId, String sdp) async {
+    if (_p2pConnection == null) return;
+
+    try {
+      await _p2pConnection!.setRemoteDescription(
+        RTCSessionDescription(sdp, 'answer'),
+      );
+      print('[P2P] Set remote description from Relay: $peerId');
+    } catch (e) {
+      print('[P2P] Failed to set remote description: $e');
+    }
+  }
+
+  /// 处理 ICE 候选
+  Future<void> _handleP2PCandidate(String peerId, String candidateStr) async {
+    if (_p2pConnection == null) return;
+
+    try {
+      // 解析候选信息（简化处理）
+      // 实际应用中需要更完整的解析
+      final candidate = RTCIceCandidate(candidateStr, '', 0);
+      await _p2pConnection!.addCandidate(candidate);
+    } catch (e) {
+      print('[P2P] Failed to add ICE candidate: $e');
+    }
+  }
+
+  /// Relay 处理订阅者的 Offer
+  void _handleOfferFromSubscriber(
+    String subscriberId,
+    Map<String, dynamic>? data,
+  ) {
+    // 只有 Relay 才处理 Offer
+    if (!isRelay) return;
+
+    final sdp = data?['sdp'] as String?;
+    if (sdp == null) return;
+
+    try {
+      // 调用 Go 层 RelayRoom 添加订阅者，返回 Answer
+      final roomPtr = toCString(roomId);
+      final peerPtr = toCString(subscriberId);
+      final offerPtr = toCString(sdp);
+
+      try {
+        final answerPtr = bindings.RelayRoomAddSubscriber(
+          roomPtr,
+          peerPtr,
+          offerPtr,
+        );
+        if (answerPtr != Pointer.fromAddress(0)) {
+          final answerSdp = fromCString(answerPtr);
+          // 发送 Answer 给订阅者
+          signaling.sendAnswer(roomId, subscriberId, answerSdp);
+          print('[Relay] Sent answer to subscriber: $subscriberId');
+        } else {
+          print(
+            '[Relay] Failed to create answer for subscriber: $subscriberId',
+          );
+        }
+      } finally {
+        calloc.free(roomPtr);
+        calloc.free(peerPtr);
+        calloc.free(offerPtr);
+      }
+    } catch (e) {
+      print('[Relay] Error handling offer from subscriber: $e');
+    }
+  }
+
+  /// Relay 处理订阅者的 ICE 候选
+  void _handleCandidateFromSubscriber(
+    String subscriberId,
+    Map<String, dynamic>? data,
+  ) {
+    // 只有 Relay 才处理
+    if (!isRelay) return;
+
+    final candidateJson = data;
+    if (candidateJson == null) return;
+
+    try {
+      final roomPtr = toCString(roomId);
+      final peerPtr = toCString(subscriberId);
+      final candidatePtr = toCString(candidateJson.toString());
+
+      try {
+        bindings.RelayRoomAddICECandidate(roomPtr, peerPtr, candidatePtr);
+      } finally {
+        calloc.free(roomPtr);
+        calloc.free(peerPtr);
+        calloc.free(candidatePtr);
+      }
+    } catch (e) {
+      print('[Relay] Error handling ICE candidate from subscriber: $e');
+    }
   }
 }

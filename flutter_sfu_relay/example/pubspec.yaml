@@ -46,6 +46,9 @@ dependencies:
   # LiveKit for real-time communication
   livekit_client: ^2.6.0
   
+  # WebRTC for P2P video rendering
+  flutter_webrtc: ^1.2.1
+  
   # Permission handling
   permission_handler: ^11.3.1
   
