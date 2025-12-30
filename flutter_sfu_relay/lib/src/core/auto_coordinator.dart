@@ -697,6 +697,15 @@ class AutoCoordinator {
   }
 
   void _resolveElection(String claimerId, int epoch, double claimerScore) {
+    // 「先到先得」逻辑：如果我们正在选举中（已广播 claim，等待超时），
+    // 则不向后来的节点让位，无论其分数高低。
+    // 这样可以避免新加入的节点抢占正在选举的节点。
+    if (_state == AutoCoordinatorState.electing) {
+      // 我们正在选举，不让位。告知对方我们的存在。
+      signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
+      return;
+    }
+
     // 如果已经有 Relay，需要比较 claimer 和当前 Relay 的分数
     if (_currentRelay != null && _currentRelay != localPeerId) {
       // 当前 Relay 不是我，比较 claimer 和当前 Relay
