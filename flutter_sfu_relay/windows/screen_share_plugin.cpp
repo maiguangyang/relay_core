@@ -330,19 +330,31 @@ void ScreenShareOverlay::CreateToolbarWindow() {
   int x = (screenWidth - toolbarWidth) / 2;
   int y = 40; // Distance from top
 
+  // NOTE: Do NOT use WS_EX_LAYERED - it conflicts with WDA_EXCLUDEFROMCAPTURE
   toolbar_window_ = CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, kToolbarClassName,
+      WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kToolbarClassName,
       L"Screen Share Toolbar", WS_POPUP, x, y, toolbarWidth, toolbarHeight,
       nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
   if (toolbar_window_) {
-    // Set layered window for transparency
-    SetLayeredWindowAttributes(toolbar_window_, 0, 245, LWA_ALPHA);
-
     // Create rounded corners (matching macOS 8px radius)
     HRGN rgn =
         CreateRoundRectRgn(0, 0, toolbarWidth + 1, toolbarHeight + 1, 16, 16);
     SetWindowRgn(toolbar_window_, rgn, TRUE);
+
+    // Exclude from screen capture (this is the key fix!)
+    // WDA_EXCLUDEFROMCAPTURE requires Windows 10 version 2004+
+    BOOL success = SetWindowDisplayAffinity(toolbar_window_, WDA_EXCLUDEFROMCAPTURE);
+    if (!success) {
+      DWORD error = GetLastError();
+      wchar_t buf[256];
+      swprintf_s(buf,
+                 L"[ScreenShare] Toolbar SetWindowDisplayAffinity FAILED! Error: %lu\n",
+                 error);
+      OutputDebugString(buf);
+    } else {
+      OutputDebugString(L"[ScreenShare] Toolbar excluded from capture successfully\n");
+    }
 
     ShowWindow(toolbar_window_, SW_SHOWNOACTIVATE);
     UpdateWindow(toolbar_window_);

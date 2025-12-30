@@ -505,6 +505,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       // 检测屏幕共享参与者
+      final previousScreenShareParticipant = _screenShareParticipant;
       _screenShareParticipant = null;
       for (final p in _participants) {
         final isLocal = p.identity == _localParticipant?.identity;
@@ -525,6 +526,18 @@ class _HomePageState extends State<HomePage> {
           }
         }
         if (_screenShareParticipant != null) break;
+      }
+
+      // 如果屏幕共享结束且用户处于全屏模式，自动退出全屏
+      if (previousScreenShareParticipant != null &&
+          _screenShareParticipant == null &&
+          _isScreenShareFullscreen) {
+        // 需要在 setState 外部调用，避免无限循环
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _exitFullscreen();
+          }
+        });
       }
     });
   }
