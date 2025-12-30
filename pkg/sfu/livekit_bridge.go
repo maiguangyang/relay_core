@@ -173,9 +173,15 @@ func (b *LiveKitBridge) onTrackSubscribed(
 	// 这是解决画质模糊问题的关键：使用远端轨道的真实编码参数
 	if b.switcher != nil {
 		codec := track.Codec()
+		codecCap := codec.RTPCodecCapability
+		fmt.Printf("[Bridge] Track Codec: MimeType=%s, ClockRate=%d, Channels=%d, SDPFmtpLine=%s, PayloadType=%d\n",
+			codecCap.MimeType, codecCap.ClockRate, codecCap.Channels, codecCap.SDPFmtpLine, codec.PayloadType)
+
 		if isVideo {
 			if err := b.switcher.SetVideoCodec(codec.RTPCodecCapability); err != nil {
-				// 设置编码器失败，记录但继续转发
+				fmt.Printf("[Bridge] ERROR: SetVideoCodec failed: %v\n", err)
+			} else {
+				fmt.Printf("[Bridge] SetVideoCodec success: %s\n", codecCap.MimeType)
 			}
 		} else {
 			if err := b.switcher.SetAudioCodec(codec.RTPCodecCapability); err != nil {
