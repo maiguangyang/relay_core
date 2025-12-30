@@ -56,9 +56,19 @@ enum SfuEventType {
   unknown(0),
   peerJoined(1),
   peerLeft(2),
-  electionResult(3),
-  relayChanged(4),
-  error(5),
+  trackAdded(3),
+  error(4),
+  iceCandidate(5),
+  relayChanged(6), // Mapped to Go's ProxyChange
+  answer(7),
+  offer(8),
+
+  // Legacy/Dart-only (placeholder to fix analyzer, verify if needed)
+  electionResult(99),
+
+  subscriberJoined(10),
+  subscriberLeft(11),
+  renegotiate(12),
   // 心跳检测事件 (来自 KeepaliveManager)
   peerOnline(20),
   peerSlow(21),

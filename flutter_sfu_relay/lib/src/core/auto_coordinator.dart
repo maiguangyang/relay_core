@@ -958,6 +958,14 @@ class AutoCoordinator {
         signaling.sendPing(roomId, event.peerId);
         break;
 
+      case SfuEventType.iceCandidate:
+        // Relay 生成了面向订阅者的 ICE 候选，通过信令发送给订阅者
+        if (event.data != null && event.peerId.isNotEmpty) {
+          // event.data 是 JSON String，直接发送
+          signaling.sendCandidate(roomId, event.peerId, event.data!);
+        }
+        break;
+
       case SfuEventType.error:
         _errorController.add(event.data ?? 'Unknown error');
         break;
