@@ -11,6 +11,7 @@ import 'package:ffi/ffi.dart';
 
 import '../bindings/bindings.dart';
 import '../bindings/utils.dart';
+import 'dart:convert';
 import '../callbacks/callbacks.dart';
 import '../enums.dart';
 import '../signaling/signaling.dart';
@@ -1126,7 +1127,8 @@ class AutoCoordinator {
 
       // 监听 ICE 候选
       _p2pConnection!.onIceCandidate = (RTCIceCandidate candidate) {
-        signaling.sendCandidate(roomId, relayId, candidate.toMap().toString());
+        // 使用标准 JSON 格式发送候选
+        signaling.sendCandidate(roomId, relayId, jsonEncode(candidate.toMap()));
       };
 
       // 创建 Offer
@@ -1168,13 +1170,19 @@ class AutoCoordinator {
   }
 
   /// 处理 ICE 候选
-  Future<void> _handleP2PCandidate(String peerId, String candidateStr) async {
+  Future<void> _handleP2PCandidate(
+    String peerId,
+    String candidateJsonStr,
+  ) async {
     if (_p2pConnection == null) return;
 
     try {
-      // 解析候选信息（简化处理）
-      // 实际应用中需要更完整的解析
-      final candidate = RTCIceCandidate(candidateStr, '', 0);
+      final map = jsonDecode(candidateJsonStr) as Map<String, dynamic>;
+      final candidate = RTCIceCandidate(
+        map['candidate'],
+        map['sdpMid'],
+        map['sdpMLineIndex'],
+      );
       await _p2pConnection!.addCandidate(candidate);
     } catch (e) {
       print('[P2P] Failed to add ICE candidate: $e');
@@ -1232,13 +1240,14 @@ class AutoCoordinator {
     // 只有 Relay 才处理
     if (!isRelay) return;
 
-    final candidateJson = data;
-    if (candidateJson == null) return;
+    // data['candidate'] 是 JSON 字符串
+    final candidateJsonStr = data?['candidate'] as String?;
+    if (candidateJsonStr == null) return;
 
     try {
       final roomPtr = toCString(roomId);
       final peerPtr = toCString(subscriberId);
-      final candidatePtr = toCString(candidateJson.toString());
+      final candidatePtr = toCString(candidateJsonStr);
 
       try {
         bindings.RelayRoomAddICECandidate(roomPtr, peerPtr, candidatePtr);
