@@ -165,8 +165,24 @@ func (b *LiveKitBridge) onTrackSubscribed(
 	isVideo := track.Kind() == webrtc.RTPCodecTypeVideo
 
 	// 对视频轨道请求最高质量（解决屏幕共享模糊问题）
+	// 注意: Go SDK 的 RemoteTrackPublication 不支持 SetVideoFPS，只能设置 Quality
 	if isVideo {
+		// 立即请求 HIGH 质量
 		pub.SetVideoQuality(livekit.VideoQuality_HIGH)
+		fmt.Printf("[Bridge] Video quality requested: HIGH for track %s (source: %s)\n", track.ID(), pub.Source())
+
+		// 延迟再次请求，确保 SFU 切换到最高质量
+		go func() {
+			// 500ms 后再次请求
+			time.Sleep(500 * time.Millisecond)
+			pub.SetVideoQuality(livekit.VideoQuality_HIGH)
+			fmt.Printf("[Bridge] Video quality re-requested (500ms): HIGH for track %s\n", track.ID())
+
+			// 2秒后再次请求，确保稳定
+			time.Sleep(1500 * time.Millisecond)
+			pub.SetVideoQuality(livekit.VideoQuality_HIGH)
+			fmt.Printf("[Bridge] Video quality re-requested (2s): HIGH for track %s\n", track.ID())
+		}()
 	}
 
 	// 获取远端轨道的完整编码参数，并更新 SourceSwitcher 的 Track

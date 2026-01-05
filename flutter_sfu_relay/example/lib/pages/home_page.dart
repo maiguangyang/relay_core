@@ -804,7 +804,17 @@ class _HomePageState extends State<HomePage> {
           debugPrint('[ScreenShare]   - Is Screen: ${result.isScreen}');
           debugPrint('[ScreenShare]   - Requested: 1920x1080 @ 60fps, 5Mbps');
 
-          await _localParticipant!.publishVideoTrack(track);
+          // 禁用 simulcast 并设置高码率，避免开始时画面模糊
+          await _localParticipant!.publishVideoTrack(
+            track,
+            publishOptions: lk.VideoPublishOptions(
+              videoEncoding: lk.VideoEncoding(
+                maxBitrate: 5 * 1000 * 1000, // 5 Mbps
+                maxFramerate: 60,
+              ),
+              simulcast: false, // 禁用 simulcast，避免低质量层级
+            ),
+          );
 
           // 发布后再次检查
           debugPrint('[ScreenShare] Track published successfully');
