@@ -795,7 +795,29 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           );
+
+          // 诊断日志：打印屏幕共享 Track 的实际参数
+          debugPrint('[ScreenShare] Track created:');
+          debugPrint('[ScreenShare]   - Track SID: ${track.sid}');
+          debugPrint('[ScreenShare]   - Source: ${result.source.id}');
+          debugPrint('[ScreenShare]   - Is Screen: ${result.isScreen}');
+          debugPrint('[ScreenShare]   - Requested: 1920x1080 @ 60fps, 5Mbps');
+
           await _localParticipant!.publishVideoTrack(track);
+
+          // 发布后再次检查
+          debugPrint('[ScreenShare] Track published successfully');
+
+          // 获取发布后的实际参数
+          for (final pub in _localParticipant!.videoTrackPublications) {
+            if (pub.source == lk.TrackSource.screenShareVideo) {
+              debugPrint('[ScreenShare] Published Track Info:');
+              debugPrint('[ScreenShare]   - SID: ${pub.sid}');
+              debugPrint('[ScreenShare]   - Name: ${pub.name}');
+              debugPrint('[ScreenShare]   - Muted: ${pub.muted}');
+              debugPrint('[ScreenShare]   - Subscribed: ${pub.subscribed}');
+            }
+          }
 
           // macOS/Windows/Linux: 显示屏幕共享 UI（最小化窗口 + 排除捕获）
           if ((Platform.isMacOS || Platform.isWindows || Platform.isLinux) &&
