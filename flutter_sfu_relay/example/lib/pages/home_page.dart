@@ -367,8 +367,6 @@ class _HomePageState extends State<HomePage> {
           if (mounted) {
             setState(() {
               _hasP2PVideo = true;
-              // P2P 连接建立，重新配置画质（暂停 SFU 订阅）
-              _updateParticipants();
             });
           }
         } else {
@@ -378,8 +376,6 @@ class _HomePageState extends State<HomePage> {
           if (mounted) {
             setState(() {
               _hasP2PVideo = false;
-              // P2P 断开，恢复 SFU 订阅
-              _updateParticipants();
             });
           }
         }
@@ -492,35 +488,45 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 配置视频画质 - 单一流架构
+  /// 局域网订阅者：取消 SFU 订阅（只用 P2P）
+  /// 蜂窝网络设备：订阅 SFU 并配置画质
   void _configureVideoQuality(lk.RemoteTrackPublication pub) {
-    // 优化：如果有 P2P 视频流，则关闭 SFU 直连订阅以节省带宽
-    if (_hasP2PVideo) {
+    final isRelay = _autoCoord?.isRelay ?? false;
+    final isOnLan =
+        _lastConnectionType == ConnectionType.ethernet ||
+        _lastConnectionType == ConnectionType.wifi;
+
+    // Relay 节点：需要订阅 SFU 来获取源视频
+    if (isRelay) {
+      if (!pub.subscribed) {
+        pub.subscribe();
+      }
+      // Relay 使用最高画质
+      pub.setVideoQuality(lk.VideoQuality.HIGH);
+      pub.setVideoFPS(60);
+      return;
+    }
+
+    // 局域网订阅者：不需要订阅 SFU（只用 P2P 流）
+    if (isOnLan) {
       if (pub.subscribed) {
-        debugPrint('[VideoQuality] P2P active, unsubscribing SFU track');
+        debugPrint(
+          '[VideoQuality] LAN subscriber: unsubscribing SFU (P2P only)',
+        );
         pub.unsubscribe();
       }
       return;
     }
 
-    // 如果没有 P2P 但未订阅，则恢复订阅
+    // 蜂窝网络设备：订阅 SFU 并节省流量
     if (!pub.subscribed) {
-      debugPrint('[VideoQuality] P2P inactive, subscribing SFU track');
+      debugPrint('[VideoQuality] Cellular: subscribing SFU');
       pub.subscribe();
     }
-
-    // 根据网络状况配置画质
-    if (_lastConnectionType == ConnectionType.cellular) {
-      // 蜂窝网络：节省流量 (MEDIUM + 15FPS)
-      debugPrint('[VideoQuality] Configuring for Cellular: MEDIUM, 15FPS');
-      pub.setVideoQuality(lk.VideoQuality.MEDIUM);
-      pub.setVideoFPS(15);
-    } else {
-      // WiFi/有线/未知：高质量 (HIGH + 60FPS)
-      // 在局域网 Relay 场景下，大部分情况应使用最高画质
-      debugPrint('[VideoQuality] Configuring for WiFi/Ethernet: HIGH, 60FPS');
-      pub.setVideoQuality(lk.VideoQuality.HIGH);
-      pub.setVideoFPS(60);
-    }
+    // 蜂窝网络使用较低画质以节省流量
+    pub.setVideoQuality(lk.VideoQuality.MEDIUM);
+    pub.setVideoFPS(15);
   }
 
   void _updateParticipants() {
@@ -2037,7 +2043,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 构建屏幕共享视频渲染器
-  /// 优先使用 P2P 流（局域网订阅者），否则使用 LiveKit 直连流
+  /// 单一流架构：局域网设备只用 P2P，蜂窝设备只用 LiveKit
+  /// 流切换逻辑在插件层完成，UI 层不再处理切换
   Widget _buildScreenShareRenderer(
     lk.VideoTrack? screenTrack,
     bool isSharerLocal,
@@ -2047,29 +2054,69 @@ class _HomePageState extends State<HomePage> {
       return lk.VideoTrackRenderer(screenTrack);
     }
 
-    // 如果有 P2P 连接且不是 Relay，优先使用 P2P 视频
     final isRelay = _autoCoord?.isRelay ?? false;
     final isOnLan =
         _lastConnectionType == ConnectionType.ethernet ||
         _lastConnectionType == ConnectionType.wifi;
 
-    if (_hasP2PVideo && _p2pVideoRenderer != null && !isRelay && isOnLan) {
-      debugPrint('[Render] Using P2P video stream from Relay');
-      return RTCVideoView(
-        _p2pVideoRenderer!,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-      );
-    }
+    // ========== 单一流架构 ==========
+    // 1. Relay 节点：使用 LiveKit 直连（它是源头，不需要 P2P）
+    // 2. 局域网订阅者：只使用 P2P 流，等待 P2P 就绪
+    // 3. 蜂窝网络设备：只使用 LiveKit 直连
 
-    // Fallback: 使用 LiveKit 直连流
-    if (screenTrack != null) {
-      debugPrint('[Render] Using LiveKit direct stream (fallback)');
-      return lk.VideoTrackRenderer(screenTrack);
+    if (isRelay) {
+      // Relay 节点直接使用 LiveKit 流
+      if (screenTrack != null) {
+        return lk.VideoTrackRenderer(screenTrack);
+      }
+    } else if (isOnLan) {
+      // 局域网订阅者：只使用 P2P 流
+      if (_hasP2PVideo && _p2pVideoRenderer != null) {
+        // P2P 流已就绪
+        return RTCVideoView(
+          _p2pVideoRenderer!,
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+        );
+      } else {
+        // P2P 流还未就绪，显示加载指示器
+        return _buildP2PLoadingIndicator();
+      }
+    } else {
+      // 蜂窝网络设备：只使用 LiveKit 直连
+      if (screenTrack != null) {
+        return lk.VideoTrackRenderer(screenTrack);
+      }
     }
 
     // 无视频
     return const Center(
       child: Icon(Icons.screen_share, size: 64, color: Colors.white30),
+    );
+  }
+
+  /// P2P 连接等待中的加载指示器
+  Widget _buildP2PLoadingIndicator() {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+              strokeWidth: 2,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '正在建立局域网连接...',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
