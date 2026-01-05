@@ -46,7 +46,7 @@ class _HomePageState extends State<HomePage> {
   final _botTokenController = TextEditingController(
     // 测试用写死的 Bot Token
     text:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTkxMTc5MzcsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NzU4MTkzNywic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.pj328J32dm8ota1xlirBaTs8B_BIIpiopN68BGMjYxk',
   );
 
   // 页面状态
