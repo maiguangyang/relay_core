@@ -994,91 +994,103 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
+    // 使用单一流架构的渲染器
+    final videoWidget = _buildScreenShareRenderer(screenTrack, isSharerLocal);
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onDoubleTap: _exitFullscreen,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 全屏视频
-            if (screenTrack != null)
+      body: KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        onKeyEvent: (event) {
+          // ESC 键退出全屏
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            _exitFullscreen();
+          }
+        },
+        child: GestureDetector(
+          onDoubleTap: _exitFullscreen,
+          // 添加 onTap 确保可以点击
+          onTap: () {},
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // 全屏视频 - 使用单一流架构渲染器
               Center(
                 child: FittedBox(
                   fit: BoxFit.contain,
                   child: SizedBox(
                     width: 1920,
                     height: 1080,
-                    child: lk.VideoTrackRenderer(screenTrack),
+                    child: videoWidget,
                   ),
                 ),
-              )
-            else
-              const Center(
-                child: Icon(
-                  Icons.screen_share,
-                  size: 64,
-                  color: Colors.white30,
+              ),
+              // 退出全屏按钮（右上角）- 增大点击区域
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 16,
+                right: 16,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: _exitFullscreen,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.fullscreen_exit,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            // 退出全屏按钮（右上角）
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              right: 16,
-              child: IconButton(
-                onPressed: _exitFullscreen,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  padding: const EdgeInsets.all(12),
-                ),
-                icon: const Icon(
-                  Icons.fullscreen_exit,
-                  color: Colors.white,
-                  size: 28,
-                ),
-              ),
-            ),
-            // 分享者信息（左下角）
-            Positioned(
-              bottom: MediaQuery.of(context).padding.bottom + 16,
-              left: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  isSharerLocal ? '你正在分享屏幕' : '${screenSharer.identity} 的屏幕',
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+              // 分享者信息（左下角）
+              Positioned(
+                bottom: MediaQuery.of(context).padding.bottom + 16,
+                left: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isSharerLocal ? '你正在分享屏幕' : '${screenSharer.identity} 的屏幕',
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
                 ),
               ),
-            ),
-            // 双击提示（右下角）
-            Positioned(
-              bottom: MediaQuery.of(context).padding.bottom + 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black38,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  '双击退出全屏',
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
+              // 双击提示（右下角）
+              Positioned(
+                bottom: MediaQuery.of(context).padding.bottom + 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black38,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    '双击退出全屏',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
+      ), // closes KeyboardListener
     );
   }
 
