@@ -264,6 +264,13 @@ class AutoCoordinator {
 
       // 4. 连接信令
       await signaling.connect();
+
+      // 蜂窝网络设备：等待 DataChannel 稳定后再发送信令消息
+      // 这解决了蜂窝网络上 publishData 间歇性超时的问题
+      if (config.connectionType == ConnectionType.cellular) {
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
       await signaling.joinRoom(roomId, localPeerId);
 
       // 5. 设置所有监听
@@ -1085,6 +1092,8 @@ class AutoCoordinator {
   }
 
   void _broadcastClaim() {
+    // 蜂窝网络设备不需要广播 claim，它们无法成为 Relay
+    if (!isOnLan) return;
     signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
   }
 

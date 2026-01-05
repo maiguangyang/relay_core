@@ -1,0 +1,42 @@
+# LiveKit 本地开发服务器配置
+port: 19885
+bind_addresses:
+  - "0.0.0.0"
+log_level: debug
+
+# API 密钥（用于生成 Token）
+keys:
+  devkey: secret
+
+rtc:
+  # 端口范围
+  port_range_start: 50000
+  port_range_end: 60000
+  
+  # 如果服务器在 NAT 后面，需要设置公网 IP（通过 frp 暴露的地址）
+  # node_ip: 120.198.55.231
+  use_external_ip : true
+  
+  # STUN 服务器
+  stun_servers:
+    - stun.l.google.com:19302
+    - stun1.l.google.com:19302
+
+  # TURN 服务器配置
+  turn_servers:
+    - host: 8.134.115.199
+      port: 3478
+      username: marlon
+      credential: "123456"
+      protocol: udp
+
+  # 如果需要 TCP/TLS TURN，可以添加：
+  # - host: 8.134.115.199
+  #   port: 443
+  #   username: marlon
+  #   credential: "123456"
+  #   protocol: tls
+
+# 启用 Redis（可选，用于多节点部署）
+# redis:
+#   address: localhost:6379

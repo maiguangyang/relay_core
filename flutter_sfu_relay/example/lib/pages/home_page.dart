@@ -37,8 +37,8 @@ class _HomePageState extends State<HomePage> {
 
   // 连接配置
   final _urlController = TextEditingController(
-    text: 'wss://frp.marlon.proton-system.com',
-    // text: 'wss://oxygen-sl1zv95n.livekit.cloud',
+    // text: 'wss://frp.marlon.proton-system.com',
+    text: 'wss://oxygen-sl1zv95n.livekit.cloud',
     // text: 'ws://192.167.167.129:19885',
   );
   final _tokenController = TextEditingController();
@@ -46,7 +46,7 @@ class _HomePageState extends State<HomePage> {
   final _botTokenController = TextEditingController(
     // 测试用写死的 Bot Token
     text:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTkxMTc5MzcsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NzU4MTkzNywic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.pj328J32dm8ota1xlirBaTs8B_BIIpiopN68BGMjYxk',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
   );
 
   // 页面状态
@@ -2489,31 +2489,52 @@ class _LiveKitSignaling implements SignalingBridge {
     }
 
     if (!_isConnected && room.connectionState != lk.ConnectionState.connected) {
+      debugPrint('[Signaling] Skipping broadcast - not connected');
+      return;
+    }
+
+    // 检查 localParticipant 是否可用
+    final participant = room.localParticipant;
+    if (participant == null) {
+      debugPrint('[Signaling] Skipping broadcast - localParticipant is null');
       return;
     }
 
     data['peerId'] = localPeerId;
     data['roomId'] = _currentRoomId;
 
-    // 在蜂窝网络上，数据通道可能需要更长时间准备
-    // 添加重试机制
-    for (int attempt = 0; attempt < 3; attempt++) {
+    // 使用指数退避重试机制，更好地处理网络不稳定情况
+    // 最多尝试 5 次，对蜂窝网络更友好
+    const maxAttempts = 5;
+    const baseDelayMs = 300;
+
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      // 再次检查是否已 disposed（可能在等待期间发生）
+      if (_disposed) return;
+
       try {
-        await room.localParticipant?.publishData(
+        await participant.publishData(
           utf8.encode(jsonEncode(data)),
           reliable: true,
         );
         return; // 成功，退出
       } catch (e) {
-        debugPrint('[Signaling] publishData attempt ${attempt + 1} failed: $e');
-        if (attempt < 2) {
-          await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+        final msgType = data['type'] ?? 'unknown';
+        debugPrint(
+          '[Signaling] publishData($msgType) attempt ${attempt + 1}/$maxAttempts failed: $e',
+        );
+
+        if (attempt < maxAttempts - 1) {
+          // 指数退避：300ms, 600ms, 1200ms, 2400ms
+          final delayMs = baseDelayMs * (1 << attempt);
+          await Future.delayed(Duration(milliseconds: delayMs));
         }
       }
     }
     // 即使失败也不抛出异常，让会议继续
+    // 这些信令消息对于蜂窝网络用户来说不是关键的（它们不参与 Relay）
     debugPrint(
-      '[Signaling] publishData failed after 3 attempts, continuing...',
+      '[Signaling] publishData(${data['type']}) failed after $maxAttempts attempts, continuing...',
     );
   }
 
