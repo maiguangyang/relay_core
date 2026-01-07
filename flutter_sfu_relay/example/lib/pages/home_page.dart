@@ -380,6 +380,9 @@ class _HomePageState extends State<HomePage> {
             setState(() {
               _hasP2PVideo = true;
             });
+            // P2P 连接后重新检测屏幕共享
+            // 因为 screenShare 消息可能在 P2P 连接之前就收到了
+            _updateParticipants();
           }
         } else {
           debugPrint('[P2P] Remote stream disconnected');
@@ -389,6 +392,7 @@ class _HomePageState extends State<HomePage> {
             setState(() {
               _hasP2PVideo = false;
             });
+            _updateParticipants();
           }
         }
       });
