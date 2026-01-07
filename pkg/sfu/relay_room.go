@@ -697,10 +697,27 @@ func (r *RelayRoom) setupSubscriberHandlers(sub *Subscriber) {
 func (r *RelayRoom) readRTCP(peerID string, sender *webrtc.RTPSender) {
 	rtcpBuf := make([]byte, 1500)
 	for {
-		if _, _, err := sender.Read(rtcpBuf); err != nil {
+		n, _, err := sender.Read(rtcpBuf)
+		if err != nil {
 			return
 		}
-		// 可以在这里处理 RTCP 反馈（如 PLI, NACK 等）
+
+		// 解析 RTCP 包，检测 PLI (Picture Loss Indication) 请求
+		// PLI 表示接收端需要关键帧
+		// RTCP 包格式: https://tools.ietf.org/html/rfc4585
+		// PLI 的 Payload Type 是 206 (PSFB), FMT=1
+		if n >= 4 {
+			// RTCP header: version(2) + padding(1) + FMT(5) + PT(8) + length(16)
+			pt := rtcpBuf[1]
+			// PT=206 是 PSFB (Payload-Specific Feedback)
+			// FMT=1 是 PLI (Picture Loss Indication)
+			fmt := (rtcpBuf[0] >> 0) & 0x1F // 低5位是 FMT
+			if pt == 206 && fmt == 1 {
+				// 收到 PLI 请求，转发给 SFU
+				utils.Info("[RelayRoom] PLI received from subscriber %s, requesting keyframe from SFU", peerID)
+				r.emitKeyframeRequest()
+			}
+		}
 	}
 }
 
