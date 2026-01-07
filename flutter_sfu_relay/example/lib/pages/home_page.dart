@@ -90,6 +90,7 @@ class _HomePageState extends State<HomePage> {
   MediaStream? _p2pRemoteStream;
   StreamSubscription<MediaStream?>? _p2pStreamSubscription;
   bool _hasP2PVideo = false;
+  bool _p2pFirstFrameRendered = false; // 视频首帧是否已渲染
 
   @override
   void initState() {
@@ -386,11 +387,23 @@ class _HomePageState extends State<HomePage> {
           // 初始化视频渲染器
           _p2pVideoRenderer ??= RTCVideoRenderer();
           await _p2pVideoRenderer!.initialize();
+
+          // 设置首帧渲染回调 - 当第一个视频帧被渲染时调用
+          _p2pVideoRenderer!.onFirstFrameRendered = () {
+            debugPrint('[P2P] First video frame rendered!');
+            if (mounted) {
+              setState(() {
+                _p2pFirstFrameRendered = true;
+              });
+            }
+          };
+
           _p2pVideoRenderer!.srcObject = stream;
           _p2pRemoteStream = stream;
           if (mounted) {
             setState(() {
               _hasP2PVideo = true;
+              _p2pFirstFrameRendered = false; // 重置首帧状态
             });
             // P2P 连接后重新检测屏幕共享
             // 因为 screenShare 消息可能在 P2P 连接之前就收到了
@@ -403,6 +416,7 @@ class _HomePageState extends State<HomePage> {
           if (mounted) {
             setState(() {
               _hasP2PVideo = false;
+              _p2pFirstFrameRendered = false; // 重置首帧状态
             });
             _updateParticipants();
           }
@@ -740,6 +754,7 @@ class _HomePageState extends State<HomePage> {
     _p2pVideoRenderer = null;
     _p2pRemoteStream = null;
     _hasP2PVideo = false;
+    _p2pFirstFrameRendered = false;
 
     // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
     await Future.delayed(const Duration(milliseconds: 2000));
@@ -2152,18 +2167,32 @@ class _HomePageState extends State<HomePage> {
       // Relay 节点直接使用 LiveKit 流
       if (screenTrack != null) {
         return lk.VideoTrackRenderer(screenTrack);
-      } else {
-        // 视频流还在加载中
-        return _buildVideoLoadingIndicator('正在加载视频流...');
       }
     } else if (isOnLan) {
       // 局域网订阅者：只使用 P2P 流
       if (_hasP2PVideo && _p2pVideoRenderer != null) {
         // P2P 流已就绪
-        return RTCVideoView(
-          _p2pVideoRenderer!,
-          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-        );
+        if (_p2pFirstFrameRendered) {
+          // 首帧已渲染，只显示视频
+          return RTCVideoView(
+            _p2pVideoRenderer!,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+          );
+        } else {
+          // 首帧未渲染，使用 Stack 叠加加载指示器
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // 底层：视频渲染器（等待首帧）
+              RTCVideoView(
+                _p2pVideoRenderer!,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              ),
+              // 上层：加载指示器（首帧渲染后会因 setState 移除）
+              _buildP2PLoadingIndicator(),
+            ],
+          );
+        }
       } else {
         // P2P 流还未就绪，显示加载指示器
         return _buildP2PLoadingIndicator();
@@ -2172,41 +2201,17 @@ class _HomePageState extends State<HomePage> {
       // 蜂窝网络设备：只使用 LiveKit 直连
       if (screenTrack != null) {
         return lk.VideoTrackRenderer(screenTrack);
-      } else {
-        // 视频流还在加载中
-        return _buildVideoLoadingIndicator('正在连接视频服务器...');
       }
     }
-  }
 
-  /// P2P 连接等待中的加载指示器
-  Widget _buildP2PLoadingIndicator() {
-    return Container(
-      color: Colors.black,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
-              strokeWidth: 2,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '正在建立局域网连接...',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      ),
+    // 无视频
+    return const Center(
+      child: Icon(Icons.screen_share, size: 64, color: Colors.white30),
     );
   }
 
-  /// 视频加载中的通用指示器
-  Widget _buildVideoLoadingIndicator(String message) {
+  /// P2P 视频加载中的指示器
+  Widget _buildP2PLoadingIndicator({String? message}) {
     return Container(
       color: Colors.black,
       child: Center(
@@ -2219,7 +2224,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 16),
             Text(
-              message,
+              message ?? (_hasP2PVideo ? '正在等待视频画面...' : '正在建立局域网连接...'),
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 14,

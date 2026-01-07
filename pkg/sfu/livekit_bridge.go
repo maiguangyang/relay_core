@@ -353,7 +353,7 @@ func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 	// 检查节流
 	b.mu.Lock()
 	now := time.Now()
-	if now.Sub(b.lastKeyframeRequest) < 200*time.Millisecond {
+	if now.Sub(b.lastKeyframeRequest) < 500*time.Millisecond {
 		b.mu.Unlock()
 		fmt.Printf("[Bridge] Keyframe request throttled (last: %v ago)\n", now.Sub(b.lastKeyframeRequest))
 		return
@@ -368,8 +368,8 @@ func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 					// 暂停订阅
 					remotePub.SetEnabled(false)
 
-					// 等待 50ms 让 SFU 完全处理暂停请求
-					time.Sleep(50 * time.Millisecond)
+					// 等待 100ms 让 SFU 完全处理暂停请求
+					time.Sleep(100 * time.Millisecond)
 
 					// 恢复订阅 - SFU 会发送新的关键帧
 					remotePub.SetEnabled(true)
