@@ -338,7 +338,9 @@ class _HomePageState extends State<HomePage> {
       // 5. 监听 Peer 加入/离开 (比 LiveKit 事件更快)
       _autoCoord!.onPeerJoined.listen((peerId) {
         if (mounted) {
-          debugPrint('[Signaling] Peer joined: $peerId');
+          debugPrint(
+            '[Signaling] Peer joined: $peerId, screenSharerPeerId: ${_autoCoord?.screenSharerPeerId}, isLocalSharing: ${_autoCoord?.isLocalScreenSharing}',
+          );
           _updateParticipants();
         }
       });
@@ -354,7 +356,7 @@ class _HomePageState extends State<HomePage> {
       _autoCoord!.onScreenShareChanged.listen((sharerPeerId) {
         if (mounted) {
           debugPrint(
-            '[ScreenShare] Screen share changed: sharer = $sharerPeerId',
+            '[ScreenShare] Screen share changed: sharer = $sharerPeerId, isLocalSharing = ${_autoCoord?.isLocalScreenSharing}',
           );
           _updateParticipants();
         }
