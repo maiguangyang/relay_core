@@ -315,12 +315,19 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 		}
 	}
 
-	// 请求关键帧，确保新订阅者能立即看到画面
-	// 延迟 500ms，因为此时 answer 还没发送给订阅者，ICE 连接还未建立
-	// 如果过早请求，关键帧会在订阅者连接前发送，导致错过
+	// 预测性关键帧请求（Predictive Keyframe Request）
+	// 策略：收到 Offer 时立即请求 + 延迟 500ms 后再请求一次
+	//
+	// 第一次请求（立即）：keyframe 会在 ICE 连接建立的同时从 SFU 发送
+	// 如果 ICE 足够快，订阅者可以立即收到 keyframe
+	//
+	// 第二次请求（延迟）：作为备份，确保 ICE 完成后一定能收到 keyframe
+	// 如果第一次 keyframe 在 ICE 完成前到达（被丢弃），第二次会补上
+	go r.emitKeyframeRequest() // 立即请求（异步，不阻塞返回 Answer）
+
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		r.emitKeyframeRequest()
+		r.emitKeyframeRequest() // 延迟备份请求
 	}()
 
 	return answer.SDP, nil
