@@ -1042,17 +1042,27 @@ class _HomePageState extends State<HomePage> {
 
     // 获取屏幕共享视频轨道
     lk.VideoTrack? screenTrack;
+    final isRelay = _autoCoord?.isRelay ?? false;
     for (final pub in screenSharer.videoTrackPublications) {
-      if (pub.source == lk.TrackSource.screenShareVideo &&
-          !pub.muted &&
-          (pub.subscribed || _hasP2PVideo || isSharerLocal)) {
+      if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
+        // 关键修复：Relay 需要先订阅 track，即使当前未订阅
+        // 之前的逻辑：只有 pub.subscribed 为 true 才调用 _configureVideoQuality
+        // 这造成了鸡生蛋问题：Relay 之前是 LAN 订阅者（已取消订阅），
+        // 变成 Relay 后 pub.subscribed 仍然是 false，无法获取 track
         if (pub is lk.RemoteTrackPublication) {
+          // Relay 需要主动订阅来获取视频源
+          if (isRelay && !pub.subscribed) {
+            debugPrint('[Relay] Subscribing to remote screen share track');
+          }
           _configureVideoQuality(pub);
         }
-        if (pub.track != null) {
-          screenTrack = pub.track as lk.VideoTrack;
+        // 检查是否可以获取 track
+        if (pub.subscribed || _hasP2PVideo || isSharerLocal) {
+          if (pub.track != null) {
+            screenTrack = pub.track as lk.VideoTrack;
+          }
+          break;
         }
-        break;
       }
     }
 
@@ -2201,18 +2211,23 @@ class _HomePageState extends State<HomePage> {
 
     // 获取屏幕共享视频轨道
     lk.VideoTrack? screenTrack;
+    final isRelay = _autoCoord?.isRelay ?? false;
     for (final pub in screenSharer.videoTrackPublications) {
-      if (pub.source == lk.TrackSource.screenShareVideo &&
-          !pub.muted &&
-          (pub.subscribed || _hasP2PVideo || isSharerLocal)) {
-        // 根据网络状况请求合适的画质
+      if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
+        // 关键修复：Relay 需要先订阅 track，即使当前未订阅
         if (pub is lk.RemoteTrackPublication) {
+          if (isRelay && !pub.subscribed) {
+            debugPrint('[Relay] Subscribing to remote screen share track');
+          }
           _configureVideoQuality(pub);
         }
-        if (pub.track != null) {
-          screenTrack = pub.track as lk.VideoTrack;
+        // 检查是否可以获取 track
+        if (pub.subscribed || _hasP2PVideo || isSharerLocal) {
+          if (pub.track != null) {
+            screenTrack = pub.track as lk.VideoTrack;
+          }
+          break;
         }
-        break;
       }
     }
 

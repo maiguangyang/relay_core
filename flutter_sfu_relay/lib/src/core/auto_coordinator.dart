@@ -1239,7 +1239,9 @@ class AutoCoordinator {
       _p2pConnection!.onTrack = (RTCTrackEvent event) {
         if (event.streams.isNotEmpty) {
           _p2pRemoteStream = event.streams.first;
-          _remoteStreamController.add(_p2pRemoteStream);
+          if (!_disposed) {
+            _remoteStreamController.add(_p2pRemoteStream);
+          }
           print('[P2P] Received remote stream from Relay');
         }
       };
@@ -1258,7 +1260,9 @@ class AutoCoordinator {
           print('[P2P] Remote stream disconnected or failed: $state');
           _p2pConnected = false;
           _p2pRemoteStream = null;
-          _remoteStreamController.add(null);
+          if (!_disposed) {
+            _remoteStreamController.add(null);
+          }
         }
       };
 
