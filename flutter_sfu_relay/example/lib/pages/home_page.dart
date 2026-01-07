@@ -2152,6 +2152,9 @@ class _HomePageState extends State<HomePage> {
       // Relay 节点直接使用 LiveKit 流
       if (screenTrack != null) {
         return lk.VideoTrackRenderer(screenTrack);
+      } else {
+        // 视频流还在加载中
+        return _buildVideoLoadingIndicator('正在加载视频流...');
       }
     } else if (isOnLan) {
       // 局域网订阅者：只使用 P2P 流
@@ -2169,13 +2172,11 @@ class _HomePageState extends State<HomePage> {
       // 蜂窝网络设备：只使用 LiveKit 直连
       if (screenTrack != null) {
         return lk.VideoTrackRenderer(screenTrack);
+      } else {
+        // 视频流还在加载中
+        return _buildVideoLoadingIndicator('正在连接视频服务器...');
       }
     }
-
-    // 无视频
-    return const Center(
-      child: Icon(Icons.screen_share, size: 64, color: Colors.white30),
-    );
   }
 
   /// P2P 连接等待中的加载指示器
@@ -2193,6 +2194,32 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 16),
             Text(
               '正在建立局域网连接...',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 视频加载中的通用指示器
+  Widget _buildVideoLoadingIndicator(String message) {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+              strokeWidth: 2,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 14,
