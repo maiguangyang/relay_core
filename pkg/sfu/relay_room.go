@@ -316,8 +316,12 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 	}
 
 	// 请求关键帧，确保新订阅者能立即看到画面
-	// 否则新订阅者需要等待下一个自然关键帧（可能需要几分钟）
-	r.emitKeyframeRequest()
+	// 延迟 500ms，因为此时 answer 还没发送给订阅者，ICE 连接还未建立
+	// 如果过早请求，关键帧会在订阅者连接前发送，导致错过
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		r.emitKeyframeRequest()
+	}()
 
 	return answer.SDP, nil
 }
@@ -717,10 +721,10 @@ func (r *RelayRoom) readRTCP(peerID string, sender *webrtc.RTPSender) {
 			fmt := (rtcpBuf[0] >> 0) & 0x1F // 低5位是 FMT
 			if pt == 206 && fmt == 1 {
 				// 节流 PLI 请求，避免频繁请求关键帧
-				// 每隔 1 秒最多转发一次
+				// 每隔 300ms 最多转发一次
 				r.mu.Lock()
 				now := time.Now()
-				if now.Sub(r.lastPLIRequest) > 1*time.Second {
+				if now.Sub(r.lastPLIRequest) > 300*time.Millisecond {
 					r.lastPLIRequest = now
 					r.mu.Unlock()
 					utils.Info("[RelayRoom] PLI received from subscriber %s, requesting keyframe from SFU", peerID)

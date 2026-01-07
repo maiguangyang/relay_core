@@ -7,7 +7,6 @@ import 'dart:async';
 import 'dart:ffi';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:flutter/foundation.dart';
 import 'package:ffi/ffi.dart';
 
 import '../bindings/bindings.dart';
