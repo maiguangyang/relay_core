@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:ffi';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ffi/ffi.dart';
 
 import '../bindings/bindings.dart';
@@ -715,7 +716,13 @@ class AutoCoordinator {
 
       // 如果本地正在屏幕共享，告诉新 Peer
       // 这确保后加入的 Peer 能知道当前谁在共享屏幕
+      debugPrint(
+        '[AutoCoordinator] New peer joined: $peerId, isLocalScreenSharing: $_isLocalScreenSharing',
+      );
       if (_isLocalScreenSharing) {
+        debugPrint(
+          '[AutoCoordinator] Sending screenShare to new peer: $peerId',
+        );
         signaling.sendScreenShare(roomId, true);
       }
     }
