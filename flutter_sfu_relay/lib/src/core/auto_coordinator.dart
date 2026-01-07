@@ -697,6 +697,10 @@ class AutoCoordinator {
     // 只有新 Peer 才触发事件和发送消息
     if (isNewPeer) {
       _peerJoinedController.add(peerId);
+      // ignore: avoid_print
+      print(
+        '[AutoCoordinator] DEBUG: After peerJoinedController.add for $peerId',
+      );
 
       // 新 Peer 加入时的处理
       if (config.autoElection) {
@@ -716,13 +720,13 @@ class AutoCoordinator {
 
       // 如果本地正在屏幕共享，告诉新 Peer
       // 这确保后加入的 Peer 能知道当前谁在共享屏幕
-      debugPrint(
+      // ignore: avoid_print
+      print(
         '[AutoCoordinator] New peer joined: $peerId, isLocalScreenSharing: $_isLocalScreenSharing',
       );
       if (_isLocalScreenSharing) {
-        debugPrint(
-          '[AutoCoordinator] Sending screenShare to new peer: $peerId',
-        );
+        // ignore: avoid_print
+        print('[AutoCoordinator] Sending screenShare to new peer: $peerId');
         signaling.sendScreenShare(roomId, true);
       }
     }
