@@ -338,9 +338,21 @@ class _HomePageState extends State<HomePage> {
       // 5. 监听 Peer 加入/离开 (比 LiveKit 事件更快)
       _autoCoord!.onPeerJoined.listen((peerId) {
         if (mounted) {
+          final isLocalSharing = _autoCoord?.isLocalScreenSharing ?? false;
+          final screenSharerPeerId = _autoCoord?.screenSharerPeerId;
           debugPrint(
-            '[Signaling] Peer joined: $peerId, screenSharerPeerId: ${_autoCoord?.screenSharerPeerId}, isLocalSharing: ${_autoCoord?.isLocalScreenSharing}',
+            '[Signaling] Peer joined: $peerId, screenSharerPeerId: $screenSharerPeerId, isLocalSharing: $isLocalSharing',
           );
+
+          // 如果本地正在屏幕共享，显式通知新加入的 Peer
+          // 作为 AutoCoordinator 内部逻辑的备用方案
+          if (isLocalSharing) {
+            debugPrint(
+              '[Signaling] Notifying new peer $peerId about local screen share',
+            );
+            _autoCoord?.notifyScreenShareStarted();
+          }
+
           _updateParticipants();
         }
       });
