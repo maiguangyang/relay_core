@@ -350,17 +350,17 @@ func (b *LiveKitBridge) RequestKeyframe() {
 }
 
 // doRequestKeyframe 实际执行关键帧请求
-// 通过先设置 LOW 再设置 HIGH 来强制 SFU 发送新的关键帧
-// 直接设置 HIGH 可能被 SFU 忽略（如果已经是 HIGH）
+// 通过先设置 OFF 再设置 HIGH 来强制 SFU 发送新的流和关键帧
+// OFF 会完全取消订阅，HIGH 会重新订阅并获取新的关键帧
 func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 	for _, p := range room.GetRemoteParticipants() {
 		for _, pub := range p.TrackPublications() {
 			if remotePub, ok := pub.(*lksdk.RemoteTrackPublication); ok {
 				if remotePub.Kind() == lksdk.TrackKindVideo {
-					// 先设置 LOW 质量，再设置 HIGH 质量
-					// 这样 SFU 会认为质量发生了变化，并发送新的关键帧
-					remotePub.SetVideoQuality(livekit.VideoQuality_LOW)
-					time.Sleep(10 * time.Millisecond)
+					// 先完全取消订阅，再重新订阅
+					// 这会强制 SFU 发送全新的流，包含关键帧
+					remotePub.SetVideoQuality(livekit.VideoQuality_OFF)
+					time.Sleep(50 * time.Millisecond)
 					remotePub.SetVideoQuality(livekit.VideoQuality_HIGH)
 					fmt.Printf("[Bridge] Keyframe requested for track %s\n", remotePub.SID())
 				}
