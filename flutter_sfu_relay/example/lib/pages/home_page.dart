@@ -350,6 +350,16 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
+      // 监听屏幕共享状态变化
+      _autoCoord!.onScreenShareChanged.listen((sharerPeerId) {
+        if (mounted) {
+          debugPrint(
+            '[ScreenShare] Screen share changed: sharer = $sharerPeerId',
+          );
+          _updateParticipants();
+        }
+      });
+
       // 5. 启动
       await _autoCoord!.start();
 
@@ -580,6 +590,25 @@ class _HomePageState extends State<HomePage> {
           }
         }
         if (_screenShareParticipant != null) break;
+      }
+
+      // 备用检测：使用 AutoCoordinator 的屏幕共享状态
+      // 当 B 重新加入时，可能还没有接收到 SFU 的 TrackPublication 更新，
+      // 但 AutoCoordinator 已经通过信令知道谁在共享屏幕
+      if (_screenShareParticipant == null && _hasP2PVideo) {
+        final screenSharerPeerId = _autoCoord?.screenSharerPeerId;
+        if (screenSharerPeerId != null && screenSharerPeerId == _currentRelay) {
+          // 从参与者列表中找到屏幕共享者
+          for (final p in _participants) {
+            if (p.identity == screenSharerPeerId) {
+              _screenShareParticipant = p;
+              debugPrint(
+                '[ScreenShare] Using AutoCoordinator fallback: detected sharer ${p.identity}',
+              );
+              break;
+            }
+          }
+        }
       }
 
       // 如果屏幕共享结束且用户处于全屏模式，自动退出全屏
