@@ -30,6 +30,9 @@ enum SignalingMessageType {
   /// Pong 响应
   pong,
 
+  /// 屏幕共享状态
+  screenShare,
+
   /// 错误
   error,
 }
@@ -124,6 +127,11 @@ abstract class SignalingBridge {
     int epoch,
     double score,
   );
+
+  /// 发送屏幕共享状态
+  ///
+  /// [isSharing] true 表示开始共享，false 表示停止共享
+  Future<void> sendScreenShare(String roomId, bool isSharing);
 
   /// 消息流
   Stream<SignalingMessage> get messages;

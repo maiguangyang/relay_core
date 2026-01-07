@@ -203,6 +203,18 @@ class WebSocketSignaling implements SignalingBridge {
   }
 
   @override
+  Future<void> sendScreenShare(String roomId, bool isSharing) async {
+    await _send(
+      SignalingMessage(
+        type: SignalingMessageType.screenShare,
+        roomId: roomId,
+        peerId: localPeerId,
+        data: {'isSharing': isSharing},
+      ),
+    );
+  }
+
+  @override
   void dispose() {
     _shouldReconnect = false;
     _socket?.close();

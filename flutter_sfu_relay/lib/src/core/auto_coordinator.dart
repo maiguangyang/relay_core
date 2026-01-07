@@ -162,6 +162,10 @@ class AutoCoordinator {
   MediaStream? _p2pRemoteStream;
   bool _p2pConnected = false;
 
+  // 屏幕共享状态
+  String? _screenSharerPeerId; // 当前屏幕共享者的 ID
+  bool _isLocalScreenSharing = false; // 本机是否正在屏幕共享
+
   // 事件流
   final _stateController = StreamController<AutoCoordinatorState>.broadcast();
   final _relayChangedController = StreamController<String>.broadcast();
@@ -169,6 +173,7 @@ class AutoCoordinator {
   final _peerLeftController = StreamController<String>.broadcast();
   final _errorController = StreamController<String>.broadcast();
   final _remoteStreamController = StreamController<MediaStream?>.broadcast();
+  final _screenShareChangedController = StreamController<String?>.broadcast();
 
   // 是否已销毁（用于防止向已关闭的 controller 添加事件）
   bool _disposed = false;
@@ -222,6 +227,19 @@ class AutoCoordinator {
   /// P2P 连接是否已建立
   bool get hasP2PConnection => _p2pConnected && _p2pRemoteStream != null;
 
+  /// 当前屏幕共享者的 ID（如果没有人共享则为 null）
+  String? get screenSharerPeerId => _screenSharerPeerId;
+
+  /// 是否有远程屏幕共享且 P2P 已连接
+  /// 局域网订阅者使用此属性判断是否应该显示屏幕共享
+  bool get hasRemoteScreenShare =>
+      _screenSharerPeerId != null &&
+      _screenSharerPeerId != localPeerId &&
+      (hasP2PConnection || !isOnLan);
+
+  /// 本机是否正在屏幕共享
+  bool get isLocalScreenSharing => _isLocalScreenSharing;
+
   // ========== 事件流 ==========
 
   Stream<AutoCoordinatorState> get onStateChanged => _stateController.stream;
@@ -233,6 +251,11 @@ class AutoCoordinator {
   /// 当 P2P 连接建立或断开时触发
   Stream<MediaStream?> get onRemoteStream => _remoteStreamController.stream;
   Stream<String> get onError => _errorController.stream;
+
+  /// 屏幕共享者变化事件
+  /// 当有人开始/停止屏幕共享时触发，发出共享者 ID（null 表示没人共享）
+  Stream<String?> get onScreenShareChanged =>
+      _screenShareChangedController.stream;
 
   // ========== 生命周期 ==========
 
@@ -349,6 +372,7 @@ class AutoCoordinator {
     _peerLeftController.close();
     _errorController.close();
     _remoteStreamController.close();
+    _screenShareChangedController.close();
   }
 
   // ========== 公开方法 ==========
@@ -399,6 +423,34 @@ class AutoCoordinator {
   /// 停止本地分享
   bool stopLocalShare() {
     return _coordinator.stopLocalShare();
+  }
+
+  /// 通知屏幕共享已开始
+  ///
+  /// 当本地用户开始屏幕共享时调用此方法，会通过信令广播给其他用户
+  void notifyScreenShareStarted() {
+    _isLocalScreenSharing = true;
+    _screenSharerPeerId = localPeerId;
+    if (!_disposed) {
+      _screenShareChangedController.add(localPeerId);
+    }
+    // 广播给其他用户
+    signaling.sendScreenShare(roomId, true);
+  }
+
+  /// 通知屏幕共享已停止
+  ///
+  /// 当本地用户停止屏幕共享时调用此方法，会通过信令广播给其他用户
+  void notifyScreenShareStopped() {
+    _isLocalScreenSharing = false;
+    if (_screenSharerPeerId == localPeerId) {
+      _screenSharerPeerId = null;
+      if (!_disposed) {
+        _screenShareChangedController.add(null);
+      }
+    }
+    // 广播给其他用户
+    signaling.sendScreenShare(roomId, false);
   }
 
   /// 获取综合状态
@@ -603,6 +655,11 @@ class AutoCoordinator {
         }
         break;
 
+      case SignalingMessageType.screenShare:
+        // 收到屏幕共享状态变更
+        _handleScreenShareMessage(message.peerId, message.data);
+        break;
+
       default:
         break;
     }
@@ -663,12 +720,41 @@ class AutoCoordinator {
     _coordinator.removePeer(peerId);
     _coordinator.removePeer(peerId);
     // _keepalive?.removePeer(peerId); // Go 层自动处理
-    _peerLeftController.add(peerId);
+    if (!_disposed) {
+      _peerLeftController.add(peerId);
+    }
+
+    // 如果离开的是屏幕共享者，清除屏幕共享状态
+    if (_screenSharerPeerId == peerId) {
+      _screenSharerPeerId = null;
+      if (!_disposed) {
+        _screenShareChangedController.add(null);
+      }
+    }
 
     // 如果是 Relay 离开，触发重新选举
     if (peerId == _currentRelay) {
       _currentRelay = null;
       triggerElection();
+    }
+  }
+
+  /// 处理屏幕共享消息
+  void _handleScreenShareMessage(String peerId, Map<String, dynamic>? data) {
+    final isSharing = data?['isSharing'] as bool? ?? false;
+
+    if (isSharing) {
+      // 有人开始屏幕共享
+      _screenSharerPeerId = peerId;
+    } else {
+      // 有人停止屏幕共享
+      if (_screenSharerPeerId == peerId) {
+        _screenSharerPeerId = null;
+      }
+    }
+
+    if (!_disposed) {
+      _screenShareChangedController.add(_screenSharerPeerId);
     }
   }
 

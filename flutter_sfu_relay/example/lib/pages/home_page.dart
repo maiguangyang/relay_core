@@ -556,12 +556,20 @@ class _HomePageState extends State<HomePage> {
       for (final p in _participants) {
         final isLocal = p.identity == _localParticipant?.identity;
         for (final pub in p.videoTrackPublications) {
-          if (pub.source == lk.TrackSource.screenShareVideo &&
-              !pub.muted &&
-              (pub.track != null || _hasP2PVideo)) {
-            // 本地参与者不需要检查 subscribed，远程参与者需要
-            // 如果有 P2P 连接，即使未订阅 SFU 也视为有效
-            if (isLocal || pub.subscribed || _hasP2PVideo) {
+          if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
+            // 判断是否有效的屏幕共享：
+            // 1. 本地分享者：track 存在即可
+            // 2. Relay（影子连接）：需要订阅 SFU
+            // 3. 局域网订阅者（P2P）：即使 track 为 null，只要有 P2P 连接就有效
+            //    因为 unsubscribe SFU 后 track 会变成 null，
+            //    但 P2P 流是通过 _p2pVideoRenderer 渲染的
+            final hasValidSource =
+                isLocal ||
+                pub.subscribed ||
+                pub.track != null ||
+                (_hasP2PVideo && p.identity == _currentRelay);
+
+            if (hasValidSource) {
               // 根据网络状况请求合适的画质
               if (!isLocal && pub is lk.RemoteTrackPublication) {
                 _configureVideoQuality(pub);
@@ -908,6 +916,13 @@ class _HomePageState extends State<HomePage> {
         if (Platform.isMacOS || Platform.isWindows) {
           await ScreenCaptureChannel.hideScreenShareUI();
         }
+      }
+
+      // 通知 AutoCoordinator 屏幕共享状态变化
+      if (newState) {
+        _autoCoord?.notifyScreenShareStarted();
+      } else {
+        _autoCoord?.notifyScreenShareStopped();
       }
 
       setState(() {
@@ -2540,6 +2555,11 @@ class _LiveKitSignaling implements SignalingBridge {
     });
   }
 
+  @override
+  Future<void> sendScreenShare(String roomId, bool isSharing) async {
+    await _broadcast({'type': 'screenShare', 'isSharing': isSharing});
+  }
+
   Future<void> _broadcast(Map<String, dynamic> data) async {
     // 如果已经 disposed，直接返回，避免触发 LiveKit SDK 的类型转换错误
     if (_disposed) {
@@ -2640,6 +2660,8 @@ class _LiveKitSignaling implements SignalingBridge {
         return SignalingMessageType.answer;
       case 'candidate':
         return SignalingMessageType.candidate;
+      case 'screenShare':
+        return SignalingMessageType.screenShare;
       default:
         return SignalingMessageType.error;
     }

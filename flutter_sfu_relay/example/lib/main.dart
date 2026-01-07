@@ -733,6 +733,11 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     _peerConnectedController.close();
   }
 
+  @override
+  Future<void> sendScreenShare(String roomId, bool isSharing) async {
+    await _broadcast({'type': 'screenShare', 'isSharing': isSharing});
+  }
+
   Future<void> _broadcast(Map<String, dynamic> data) async {
     data['peerId'] = localPeerId;
     data['roomId'] = _currentRoomId;
@@ -785,6 +790,8 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
         return SignalingMessageType.answer;
       case 'candidate':
         return SignalingMessageType.candidate;
+      case 'screenShare':
+        return SignalingMessageType.screenShare;
       default:
         return SignalingMessageType.error;
     }
