@@ -348,12 +348,12 @@ func (b *LiveKitBridge) RequestKeyframe() {
 
 // doRequestKeyframe 实际执行关键帧请求
 // 使用 SetEnabled(false→true) 强制重新订阅
-// 带有节流机制，每 2 秒最多执行一次
+// 带有节流机制，每 500ms 最多执行一次
 func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 	// 检查节流
 	b.mu.Lock()
 	now := time.Now()
-	if now.Sub(b.lastKeyframeRequest) < 2*time.Second {
+	if now.Sub(b.lastKeyframeRequest) < 500*time.Millisecond {
 		b.mu.Unlock()
 		fmt.Printf("[Bridge] Keyframe request throttled (last: %v ago)\n", now.Sub(b.lastKeyframeRequest))
 		return
