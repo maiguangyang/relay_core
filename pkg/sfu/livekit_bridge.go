@@ -59,6 +59,12 @@ type LiveKitBridge struct {
 
 	state LiveKitBridgeState
 
+	// 视频 SSRC，用于发送 PLI
+	videoSSRC uint32
+
+	// 上次请求关键帧的时间，用于节流
+	lastKeyframeRequest time.Time
+
 	// 统计
 	videoPacketsReceived uint64
 	audioPacketsReceived uint64
@@ -194,6 +200,12 @@ func (b *LiveKitBridge) onTrackSubscribed(
 			codecCap.MimeType, codecCap.ClockRate, codecCap.Channels, codecCap.SDPFmtpLine, codec.PayloadType)
 
 		if isVideo {
+			// 保存视频 SSRC 用于后续 PLI 请求
+			b.mu.Lock()
+			b.videoSSRC = uint32(track.SSRC())
+			b.mu.Unlock()
+			fmt.Printf("[Bridge] Video SSRC saved: %d for track %s\n", track.SSRC(), track.ID())
+
 			if err := b.switcher.SetVideoCodec(codec.RTPCodecCapability); err != nil {
 				fmt.Printf("[Bridge] ERROR: SetVideoCodec failed: %v\n", err)
 			} else {
@@ -319,8 +331,8 @@ func (b *LiveKitBridge) Close() {
 }
 
 // RequestKeyframe 请求关键帧
-// 通过重新设置视频质量来触发 SFU 发送关键帧
-// 当新订阅者加入时调用，确保新订阅者能立即看到画面
+// 使用单次 SetEnabled 切换来触发关键帧
+// 只执行一次，避免多次中断流导致关键帧丢失
 func (b *LiveKitBridge) RequestKeyframe() {
 	b.mu.RLock()
 	room := b.room
@@ -330,40 +342,40 @@ func (b *LiveKitBridge) RequestKeyframe() {
 		return
 	}
 
-	// 立即请求一次关键帧
+	// 只执行一次关键帧请求，避免多次中断流
 	b.doRequestKeyframe(room)
-
-	// 延迟再请求几次，确保关键帧能够到达新订阅者
-	// 这解决了首次请求可能因时序问题未能生效的情况
-	go func() {
-		delays := []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 1000 * time.Millisecond}
-		for _, delay := range delays {
-			time.Sleep(delay)
-			b.mu.RLock()
-			room := b.room
-			b.mu.RUnlock()
-			if room != nil {
-				b.doRequestKeyframe(room)
-			}
-		}
-	}()
 }
 
 // doRequestKeyframe 实际执行关键帧请求
-// 通过 SetEnabled(false→true) 强制重新订阅来获取关键帧
-// SetVideoQuality(HIGH) 当已经是 HIGH 时不会触发关键帧
+// 使用 SetEnabled(false→true) 强制重新订阅
+// 带有节流机制，每 2 秒最多执行一次
 func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
+	// 检查节流
+	b.mu.Lock()
+	now := time.Now()
+	if now.Sub(b.lastKeyframeRequest) < 2*time.Second {
+		b.mu.Unlock()
+		fmt.Printf("[Bridge] Keyframe request throttled (last: %v ago)\n", now.Sub(b.lastKeyframeRequest))
+		return
+	}
+	b.lastKeyframeRequest = now
+	b.mu.Unlock()
+
 	for _, p := range room.GetRemoteParticipants() {
 		for _, pub := range p.TrackPublications() {
 			if remotePub, ok := pub.(*lksdk.RemoteTrackPublication); ok {
 				if remotePub.Kind() == lksdk.TrackKindVideo {
-					// 使用 SetEnabled 切换来强制重新订阅
-					// 这会触发 SFU 发送新的关键帧
+					// 暂停订阅
 					remotePub.SetEnabled(false)
-					time.Sleep(20 * time.Millisecond)
+
+					// 等待 100ms 让 SFU 完全处理暂停请求
+					time.Sleep(100 * time.Millisecond)
+
+					// 恢复订阅 - SFU 会发送新的关键帧
 					remotePub.SetEnabled(true)
 					remotePub.SetVideoQuality(livekit.VideoQuality_HIGH)
-					fmt.Printf("[Bridge] Keyframe requested (re-enable) for track %s\n", remotePub.SID())
+					fmt.Printf("[Bridge] Keyframe requested (toggle) for track %s\n", remotePub.SID())
+					return // 只处理第一个视频轨道
 				}
 			}
 		}
