@@ -330,6 +330,27 @@ func (b *LiveKitBridge) RequestKeyframe() {
 		return
 	}
 
+	// 立即请求一次关键帧
+	b.doRequestKeyframe(room)
+
+	// 延迟再请求几次，确保关键帧能够到达新订阅者
+	// 这解决了首次请求可能因时序问题未能生效的情况
+	go func() {
+		delays := []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 1000 * time.Millisecond}
+		for _, delay := range delays {
+			time.Sleep(delay)
+			b.mu.RLock()
+			room := b.room
+			b.mu.RUnlock()
+			if room != nil {
+				b.doRequestKeyframe(room)
+			}
+		}
+	}()
+}
+
+// doRequestKeyframe 实际执行关键帧请求
+func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 	// 遍历所有远程参与者的视频轨道，重新请求 HIGH 质量
 	// 这会触发 SFU 发送新的关键帧
 	for _, p := range room.GetRemoteParticipants() {
