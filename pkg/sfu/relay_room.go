@@ -294,6 +294,24 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 	// 触发回调
 	r.emitSubscriberJoined(peerID)
 
+	// 确保新订阅者使用当前活跃的视频轨道
+	// 如果 SetVideoCodec 已经被调用过，当前的视频轨道可能与 AddTrack 时使用的不同
+	// 通过 ReplaceTrack 确保新订阅者获得正确的视频轨道
+	currentVideoTrack := r.switcher.GetVideoTrack()
+	currentAudioTrack := r.switcher.GetAudioTrack()
+	if sub.videoSender != nil && currentVideoTrack != nil {
+		if err := sub.videoSender.ReplaceTrack(currentVideoTrack); err != nil {
+			utils.Error("[RelayRoom] ReplaceTrack for new subscriber %s failed: %v", peerID, err)
+		} else {
+			utils.Info("[RelayRoom] ReplaceTrack for new subscriber %s success", peerID)
+		}
+	}
+	if sub.audioSender != nil && currentAudioTrack != nil {
+		if err := sub.audioSender.ReplaceTrack(currentAudioTrack); err != nil {
+			utils.Error("[RelayRoom] ReplaceAudioTrack for new subscriber %s failed: %v", peerID, err)
+		}
+	}
+
 	// 请求关键帧，确保新订阅者能立即看到画面
 	// 否则新订阅者需要等待下一个自然关键帧（可能需要几分钟）
 	r.emitKeyframeRequest()
