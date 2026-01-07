@@ -141,6 +141,15 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 		},
 	)
 
+	// 设置关键帧请求回调
+	// 当新订阅者加入时，请求 SFU 发送关键帧，确保新订阅者能立即看到画面
+	room.SetKeyframeRequestCallback(func(rID string) {
+		if bridge := sfu.GetBridge(rID); bridge != nil {
+			utils.Info("Requesting keyframe for new subscriber in room %s", rID)
+			bridge.RequestKeyframe()
+		}
+	})
+
 	registerRelayRoom(goRoomID, room)
 	// 注册 SourceSwitcher，让 LiveKitBridge 能够获取到同一个实例
 	registerSourceSwitcher(goRoomID, room.GetSourceSwitcher())

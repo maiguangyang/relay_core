@@ -88,6 +88,7 @@ type RelayRoom struct {
 	onICECandidate     func(roomID, peerID string, candidate *webrtc.ICECandidate)
 	onNeedRenegotiate  func(roomID, peerID string, offer string)
 	onError            func(roomID, peerID string, err error)
+	onKeyframeRequest  func(roomID string) // 请求关键帧回调
 
 	closed bool
 }
@@ -166,6 +167,14 @@ func (r *RelayRoom) SetCallbacks(
 	r.onICECandidate = onICE
 	r.onNeedRenegotiate = onRenegotiate
 	r.onError = onError
+}
+
+// SetKeyframeRequestCallback 设置关键帧请求回调
+// 当新订阅者加入时触发，用于向 SFU 请求关键帧
+func (r *RelayRoom) SetKeyframeRequestCallback(fn func(roomID string)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onKeyframeRequest = fn
 }
 
 // GetSourceSwitcher 返回源切换器
@@ -284,6 +293,10 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 
 	// 触发回调
 	r.emitSubscriberJoined(peerID)
+
+	// 请求关键帧，确保新订阅者能立即看到画面
+	// 否则新订阅者需要等待下一个自然关键帧（可能需要几分钟）
+	r.emitKeyframeRequest()
 
 	return answer.SDP, nil
 }
@@ -716,6 +729,15 @@ func (r *RelayRoom) emitError(peerID string, err error) {
 	r.mu.RUnlock()
 	if fn != nil {
 		fn(r.id, peerID, err)
+	}
+}
+
+func (r *RelayRoom) emitKeyframeRequest() {
+	r.mu.RLock()
+	fn := r.onKeyframeRequest
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(r.id)
 	}
 }
 

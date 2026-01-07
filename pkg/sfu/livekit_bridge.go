@@ -318,6 +318,33 @@ func (b *LiveKitBridge) Close() {
 	}
 }
 
+// RequestKeyframe 请求关键帧
+// 通过重新设置视频质量来触发 SFU 发送关键帧
+// 当新订阅者加入时调用，确保新订阅者能立即看到画面
+func (b *LiveKitBridge) RequestKeyframe() {
+	b.mu.RLock()
+	room := b.room
+	b.mu.RUnlock()
+
+	if room == nil {
+		return
+	}
+
+	// 遍历所有远程参与者的视频轨道，重新请求 HIGH 质量
+	// 这会触发 SFU 发送新的关键帧
+	for _, p := range room.GetRemoteParticipants() {
+		for _, pub := range p.TrackPublications() {
+			if remotePub, ok := pub.(*lksdk.RemoteTrackPublication); ok {
+				if remotePub.Kind() == lksdk.TrackKindVideo {
+					// 重新请求 HIGH 质量会触发 SFU 发送关键帧
+					remotePub.SetVideoQuality(livekit.VideoQuality_HIGH)
+					fmt.Printf("[Bridge] Keyframe requested for track %s\n", remotePub.SID())
+				}
+			}
+		}
+	}
+}
+
 // GetState 获取当前状态
 func (b *LiveKitBridge) GetState() LiveKitBridgeState {
 	b.mu.RLock()
