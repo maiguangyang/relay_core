@@ -350,16 +350,20 @@ func (b *LiveKitBridge) RequestKeyframe() {
 }
 
 // doRequestKeyframe 实际执行关键帧请求
-// 设置 HIGH 质量来请求关键帧
-// 主要的关键帧请求现在通过 PLI 转发机制处理
+// 通过 SetEnabled(false→true) 强制重新订阅来获取关键帧
+// SetVideoQuality(HIGH) 当已经是 HIGH 时不会触发关键帧
 func (b *LiveKitBridge) doRequestKeyframe(room *lksdk.Room) {
 	for _, p := range room.GetRemoteParticipants() {
 		for _, pub := range p.TrackPublications() {
 			if remotePub, ok := pub.(*lksdk.RemoteTrackPublication); ok {
 				if remotePub.Kind() == lksdk.TrackKindVideo {
-					// 请求 HIGH 质量会触发 SFU 发送关键帧
+					// 使用 SetEnabled 切换来强制重新订阅
+					// 这会触发 SFU 发送新的关键帧
+					remotePub.SetEnabled(false)
+					time.Sleep(20 * time.Millisecond)
+					remotePub.SetEnabled(true)
 					remotePub.SetVideoQuality(livekit.VideoQuality_HIGH)
-					fmt.Printf("[Bridge] Keyframe requested for track %s\n", remotePub.SID())
+					fmt.Printf("[Bridge] Keyframe requested (re-enable) for track %s\n", remotePub.SID())
 				}
 			}
 		}

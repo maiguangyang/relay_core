@@ -90,6 +90,9 @@ type RelayRoom struct {
 	onError            func(roomID, peerID string, err error)
 	onKeyframeRequest  func(roomID string) // 请求关键帧回调
 
+	// PLI 节流
+	lastPLIRequest time.Time
+
 	closed bool
 }
 
@@ -713,9 +716,19 @@ func (r *RelayRoom) readRTCP(peerID string, sender *webrtc.RTPSender) {
 			// FMT=1 是 PLI (Picture Loss Indication)
 			fmt := (rtcpBuf[0] >> 0) & 0x1F // 低5位是 FMT
 			if pt == 206 && fmt == 1 {
-				// 收到 PLI 请求，转发给 SFU
-				utils.Info("[RelayRoom] PLI received from subscriber %s, requesting keyframe from SFU", peerID)
-				r.emitKeyframeRequest()
+				// 节流 PLI 请求，避免频繁请求关键帧
+				// 每隔 1 秒最多转发一次
+				r.mu.Lock()
+				now := time.Now()
+				if now.Sub(r.lastPLIRequest) > 1*time.Second {
+					r.lastPLIRequest = now
+					r.mu.Unlock()
+					utils.Info("[RelayRoom] PLI received from subscriber %s, requesting keyframe from SFU", peerID)
+					r.emitKeyframeRequest()
+				} else {
+					r.mu.Unlock()
+					// 跳过此 PLI，太频繁
+				}
 			}
 		}
 	}
