@@ -603,6 +603,8 @@ class _HomePageState extends State<HomePage> {
 
       // 检测屏幕共享参与者
       _screenShareParticipant = null;
+      final screenSharerPeerId = _autoCoord?.screenSharerPeerId;
+
       for (final p in _participants) {
         final isLocal = p.identity == _localParticipant?.identity;
         for (final pub in p.videoTrackPublications) {
@@ -610,14 +612,14 @@ class _HomePageState extends State<HomePage> {
             // 判断是否有效的屏幕共享：
             // 1. 本地分享者：track 存在即可
             // 2. Relay（影子连接）：需要订阅 SFU
-            // 3. 局域网订阅者（P2P）：即使 track 为 null，只要有 P2P 连接就有效
+            // 3. 局域网订阅者（P2P）：即使 track 为 null，只要有 P2P 连接并且该参与者是屏幕共享者就有效
             //    因为 unsubscribe SFU 后 track 会变成 null，
             //    但 P2P 流是通过 _p2pVideoRenderer 渲染的
             final hasValidSource =
                 isLocal ||
                 pub.subscribed ||
                 pub.track != null ||
-                (_hasP2PVideo && p.identity == _currentRelay);
+                (_hasP2PVideo && p.identity == screenSharerPeerId);
 
             if (hasValidSource) {
               // 根据网络状况请求合适的画质
@@ -635,18 +637,17 @@ class _HomePageState extends State<HomePage> {
       // 备用检测：使用 AutoCoordinator 的屏幕共享状态
       // 当 B 重新加入时，可能还没有接收到 SFU 的 TrackPublication 更新，
       // 但 AutoCoordinator 已经通过信令知道谁在共享屏幕
-      if (_screenShareParticipant == null && _hasP2PVideo) {
-        final screenSharerPeerId = _autoCoord?.screenSharerPeerId;
-        if (screenSharerPeerId != null && screenSharerPeerId == _currentRelay) {
-          // 从参与者列表中找到屏幕共享者
-          for (final p in _participants) {
-            if (p.identity == screenSharerPeerId) {
-              _screenShareParticipant = p;
-              debugPrint(
-                '[ScreenShare] Using AutoCoordinator fallback: detected sharer ${p.identity}',
-              );
-              break;
-            }
+      if (_screenShareParticipant == null &&
+          _hasP2PVideo &&
+          screenSharerPeerId != null) {
+        // 从参与者列表中找到屏幕共享者
+        for (final p in _participants) {
+          if (p.identity == screenSharerPeerId) {
+            _screenShareParticipant = p;
+            debugPrint(
+              '[ScreenShare] Using AutoCoordinator fallback: detected sharer ${p.identity}',
+            );
+            break;
           }
         }
       }
