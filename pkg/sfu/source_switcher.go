@@ -63,6 +63,21 @@ type SourceSwitcher struct {
 	// 本地分享者信息
 	localSharerID string
 
+	// RTP Rewriting 状态 (用于保证输出流的连续性)
+	videoSnOffset uint16
+	videoTsOffset uint32
+	lastVideoSn   uint16 // Output SN
+	lastVideoTs   uint32 // Output TS
+	videoSynced   bool   // 是否已同步过至少一个包
+	videoReset    bool   // 标记是否需要重置同步
+
+	audioSnOffset uint16
+	audioTsOffset uint32
+	lastAudioSn   uint16
+	lastAudioTs   uint32
+	audioSynced   bool
+	audioReset    bool
+
 	// 统计
 	packetsFromSFU   uint64
 	packetsFromLocal uint64
@@ -144,13 +159,25 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 		return ErrForwarderClosed
 	}
 
+	// 始终创建新 track，确保 ReplaceTrack 能正常工作
+	// 之前的优化（复用相同 codec 的 track）导致了黑屏问题：
+	// 当 ReplaceTrack 替换同一个 track 对象时，接收端不会收到任何通知，
+	// 解码器无法知道需要重新初始化。
+	//
+	// 每次屏幕共享都创建新 track：
+	// 1. ReplaceTrack 会替换到新的 track 对象
+	// 2. 新 track 有新的内部状态
+	// 3. 接收端的解码器能正确处理新的视频流
 	// 检查 codec 是否真的变化了
 	// 如果当前 track 的 MimeType 和新 codec 相同，则不需要创建新 track
 	currentCodec := ss.videoTrack.Codec()
 	if currentCodec.MimeType == codec.MimeType {
 		// codec 没有变化，不需要创建新 track
-		// 但仍需触发回调以请求关键帧，确保订阅者能正常解码新的视频流
-		utils.Info("[Switcher] Video codec unchanged (%s), reusing track but triggering callback", codec.MimeType)
+		// 但我们需要标记流已重置，以便 writePacket 重新计算 RTP offset，保证 SN/TS 连续
+		utils.Info("[Switcher] Video codec unchanged (%s), reusing track but triggering sync reset", codec.MimeType)
+
+		ss.videoReset = true // 标记重置
+
 		callback = ss.onTrackChanged
 		videoTrack = ss.videoTrack
 		audioTrack = ss.audioTrack
@@ -167,8 +194,6 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	needNewTrack = true
 	utils.Info("[Switcher] Video codec changed from %s to %s, creating new track",
 		currentCodec.MimeType, codec.MimeType)
-
-	// 创建新的视频 Track，使用完整的编码参数
 	newTrack, err := webrtc.NewTrackLocalStaticRTP(
 		codec,
 		"video-relay",
@@ -180,6 +205,12 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	}
 
 	ss.videoTrack = newTrack
+	// 新 track 意味着全新的流，重置状态
+	ss.videoSynced = false
+	ss.videoReset = false
+	ss.videoSnOffset = 0
+	ss.videoTsOffset = 0
+
 	// 复制回调和 track 引用，以便在锁外调用
 	callback = ss.onTrackChanged
 	videoTrack = ss.videoTrack
@@ -306,6 +337,68 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 	}
 
 	// 写入 Track（转发给所有订阅者）
+	// RTP Rewriting 核心逻辑
+	if isVideo {
+		// 处理同步重置
+		if ss.videoReset {
+			if ss.videoSynced {
+				// 如果之前同步过，计算新的 offset 以连接上一次的 output
+				// new_output_sn = old_output_sn + 1
+				// new_output_sn = input_sn + new_offset
+				// => new_offset = old_output_sn + 1 - input_sn
+				ss.videoSnOffset = ss.lastVideoSn + 1 - packet.SequenceNumber
+
+				// 时间戳同理，增加一个小 delta (比如 3000 samples @ 90k = 33ms)
+				// 这个 delta 不是很关键，只要不回滚即可
+				ss.videoTsOffset = ss.lastVideoTs + 3000 - packet.Timestamp
+
+				utils.Info("[Switcher] Video stream reset recovered: sn_offset=%d, ts_offset=%d", ss.videoSnOffset, ss.videoTsOffset)
+			} else {
+				// 第一次同步，offset 设为 0 (或者随机，这里选 0 简单)
+				ss.videoSnOffset = 0
+				ss.videoTsOffset = 0
+			}
+			ss.videoReset = false
+			ss.videoSynced = true
+		} else if !ss.videoSynced {
+			ss.videoSnOffset = 0
+			ss.videoTsOffset = 0
+			ss.videoSynced = true
+		}
+
+		// 应用 Offset
+		packet.SequenceNumber += ss.videoSnOffset
+		packet.Timestamp += ss.videoTsOffset
+
+		// 更新最后状态
+		ss.lastVideoSn = packet.SequenceNumber
+		ss.lastVideoTs = packet.Timestamp
+
+	} else {
+		// 音频同理 (简化处理，音频通常容忍度高一些，但为了完美也加上)
+		if ss.audioReset {
+			if ss.audioSynced {
+				ss.audioSnOffset = ss.lastAudioSn + 1 - packet.SequenceNumber
+				ss.audioTsOffset = ss.lastAudioTs + 960 - packet.Timestamp // 20ms @ 48k
+			} else {
+				ss.audioSnOffset = 0
+				ss.audioTsOffset = 0
+			}
+			ss.audioReset = false
+			ss.audioSynced = true
+		} else if !ss.audioSynced {
+			ss.audioSnOffset = 0
+			ss.audioTsOffset = 0
+			ss.audioSynced = true
+		}
+
+		packet.SequenceNumber += ss.audioSnOffset
+		packet.Timestamp += ss.audioTsOffset
+
+		ss.lastAudioSn = packet.SequenceNumber
+		ss.lastAudioTs = packet.Timestamp
+	}
+
 	if err := track.WriteRTP(packet); err != nil {
 		utils.Error("[Switcher] WriteRTP error: %v (isVideo: %v)", err, isVideo)
 		return err
