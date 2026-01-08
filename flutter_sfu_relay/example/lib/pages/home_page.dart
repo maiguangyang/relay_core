@@ -324,6 +324,10 @@ class _HomePageState extends State<HomePage> {
             debugPrint('[ShadowConnection] No Bot Token available');
             return null;
           },
+          // 云端订阅管理回调：插件层自动触发，避免双重带宽消耗
+          onCloudSubscriptionChanged: (screenSharerPeerId, shouldSubscribe) {
+            _handleCloudSubscriptionChange(screenSharerPeerId, shouldSubscribe);
+          },
         ),
       );
 
@@ -648,6 +652,55 @@ class _HomePageState extends State<HomePage> {
       }
       // 注意：不再自动退出全屏，由用户手动控制窗口大小
     });
+  }
+
+  /// 处理云端订阅变更回调（由插件层触发）
+  void _handleCloudSubscriptionChange(
+    String screenSharerPeerId,
+    bool shouldSubscribe,
+  ) {
+    // 只有非 Relay 的设备才需要管理
+    if (_autoCoord?.isRelay == true) return;
+
+    // 在参与者中查找屏幕共享者
+    lk.RemoteParticipant? sharer;
+    final participants = _room?.remoteParticipants;
+    if (participants != null) {
+      for (final p in participants.values) {
+        if (p.identity == screenSharerPeerId) {
+          sharer = p;
+          break;
+        }
+      }
+    }
+    if (sharer == null) return;
+
+    // 查找屏幕共享的 RemoteTrackPublication
+    lk.RemoteTrackPublication? screenPub;
+    for (final pub in sharer.videoTrackPublications) {
+      if (pub.source == lk.TrackSource.screenShareVideo) {
+        screenPub = pub;
+        break;
+      }
+    }
+    if (screenPub == null) return;
+
+    // 执行订阅/取消订阅
+    if (shouldSubscribe) {
+      if (!screenPub.subscribed) {
+        debugPrint(
+          '[Bandwidth] P2P inactive, subscribing to Cloud screen share for fallback',
+        );
+        screenPub.subscribe();
+      }
+    } else {
+      if (screenPub.subscribed) {
+        debugPrint(
+          '[Bandwidth] P2P active, unsubscribing from Cloud screen share to save bandwidth',
+        );
+        screenPub.unsubscribe();
+      }
+    }
   }
 
   /// 启动 RTP 统计监控

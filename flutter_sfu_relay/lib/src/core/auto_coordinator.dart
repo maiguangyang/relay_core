@@ -52,6 +52,28 @@ class AutoCoordinatorConfig {
   /// 返回 null 表示不启动影子连接
   final BotTokenCallback? onRequestBotToken;
 
+  /// 云端订阅状态变更回调（带宽优化）
+  ///
+  /// 当 P2P 连接可用时，插件会调用 callback(screenSharerPeerId, false)，
+  /// 表示应取消对该用户云端流的订阅以节省带宽。
+  ///
+  /// 当 P2P 连接断开时，插件会调用 callback(screenSharerPeerId, true)，
+  /// 表示应恢复对该用户云端流的订阅作为回退。
+  ///
+  /// 示例用法：
+  /// ```dart
+  /// onCloudSubscriptionChanged: (peerId, shouldSubscribe) {
+  ///   final pub = findScreenSharePublication(peerId);
+  ///   if (shouldSubscribe) {
+  ///     pub?.subscribe();
+  ///   } else {
+  ///     pub?.unsubscribe();
+  ///   }
+  /// },
+  /// ```
+  final void Function(String screenSharerPeerId, bool shouldSubscribeCloud)?
+  onCloudSubscriptionChanged;
+
   const AutoCoordinatorConfig({
     this.deviceType = DeviceType.unknown,
     this.connectionType = ConnectionType.unknown,
@@ -62,6 +84,7 @@ class AutoCoordinatorConfig {
     this.recoveryDelayMs = 30000, // 30秒后自动恢复
     this.livekitUrl,
     this.onRequestBotToken,
+    this.onCloudSubscriptionChanged,
   });
 }
 
@@ -1267,6 +1290,14 @@ class AutoCoordinator {
           _p2pRemoteStream = event.streams.first;
           if (!_disposed) {
             _remoteStreamController.add(_p2pRemoteStream);
+
+            // 触发云端订阅管理回调：P2P 已可用，应取消云端订阅以节省带宽
+            if (_screenSharerPeerId != null) {
+              config.onCloudSubscriptionChanged?.call(
+                _screenSharerPeerId!,
+                false,
+              );
+            }
           }
           print('[P2P] Received remote stream from Relay');
         }
@@ -1288,6 +1319,14 @@ class AutoCoordinator {
           _p2pRemoteStream = null;
           if (!_disposed) {
             _remoteStreamController.add(null);
+
+            // 触发云端订阅管理回调：P2P 已断开，应恢复云端订阅作为回退
+            if (_screenSharerPeerId != null) {
+              config.onCloudSubscriptionChanged?.call(
+                _screenSharerPeerId!,
+                true,
+              );
+            }
           }
         }
       };
