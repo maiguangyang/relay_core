@@ -375,24 +375,54 @@ class _HomePageState extends State<HomePage> {
           // 关键修复：当远程用户开始屏幕共享时，如果 P2P 已连接，
           // Go 层使用 ReplaceTrack 而不是添加新 track，
           // 这不会触发 Flutter 的 onTrack 回调。
-          // 需要重新设置渲染器的 srcObject 来强制刷新。
+          // 需要完全重新初始化渲染器来强制刷新。
           if (sharerPeerId != null &&
               sharerPeerId != _localParticipant?.identity &&
               _hasP2PVideo &&
               _p2pVideoRenderer != null &&
               _p2pRemoteStream != null) {
             debugPrint(
-              '[ScreenShare] Resetting P2P renderer for new screen share',
+              '[ScreenShare] Reinitializing P2P renderer for new screen share',
             );
-            // 先设置为 null，然后重新设置，强制渲染器刷新
-            _p2pVideoRenderer!.srcObject = null;
-            Future.microtask(() {
-              if (mounted && _p2pRemoteStream != null) {
-                _p2pVideoRenderer!.srcObject = _p2pRemoteStream;
-                setState(() {
-                  _p2pFirstFrameRendered = false; // 重置首帧状态，等待新的首帧
-                });
-              }
+
+            // 立即显示加载指示器
+            setState(() {
+              _p2pFirstFrameRendered = false;
+            });
+
+            // 保存旧渲染器和流
+            final oldRenderer = _p2pVideoRenderer;
+            final stream = _p2pRemoteStream;
+
+            // 创建新渲染器
+            _p2pVideoRenderer = RTCVideoRenderer();
+            _p2pVideoRenderer!.initialize().then((_) {
+              if (!mounted) return;
+
+              // 设置新的首帧回调
+              _p2pVideoRenderer!.onFirstFrameRendered = () {
+                debugPrint('[P2P] First video frame rendered! (after reinit)');
+                if (mounted) {
+                  setState(() {
+                    _p2pFirstFrameRendered = true;
+                  });
+                }
+              };
+
+              // 设置流
+              _p2pVideoRenderer!.srcObject = stream;
+              debugPrint(
+                '[ScreenShare] New renderer initialized and stream set',
+              );
+
+              // 触发重绘
+              setState(() {});
+            });
+
+            // 清理旧渲染器（稍后进行，避免闪烁）
+            Future.delayed(const Duration(milliseconds: 100), () {
+              oldRenderer?.srcObject = null;
+              oldRenderer?.dispose();
             });
           }
 
