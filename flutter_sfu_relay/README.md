@@ -56,6 +56,8 @@ dependencies:
     path: ../flutter_sfu_relay
 ```
 
+> **📦 开箱即用**：本插件已内置所有支持平台的预编译共享库（`.so`, `.dll`, `.dylib`, `.xcframework`），无需安装 Go 环境或配置 NDK 即可直接运行。
+
 ## 快速开始
 
 ### 1. 初始化

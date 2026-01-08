@@ -58,6 +58,8 @@ bool injectLocalPacket(bool isVideo, List<int> data);
 // 本地分享
 bool startLocalShare();
 bool stopLocalShare();
+void notifyScreenShareStarted(); // 通知 Coordinator 本地屏幕共享开始
+void notifyScreenShareStopped(); // 通知 Coordinator 本地屏幕共享结束
 
 // 手动触发
 void triggerElection();
@@ -66,18 +68,20 @@ void triggerElection();
 Map<String, dynamic> getStatus();
 
 // 属性
-AutoCoordinatorState get state;  // idle, connecting, electing, connected, asRelay
+AutoCoordinatorState get state;
 bool get isRelay;
 String? get currentRelay;
 int get currentEpoch;
 double get localScore;
 Set<String> get peers;
+String? get screenSharerPeerId; // 当前屏幕共享者 PeerId (null表示无人共享)
 
 // 事件流
 Stream<AutoCoordinatorState> get onStateChanged;
 Stream<String> get onRelayChanged;
 Stream<String> get onPeerJoined;
 Stream<String> get onPeerLeft;
+Stream<String?> get onScreenShareChanged; // 屏幕共享状态变更 (null=结束)
 Stream<String> get onError;
 ```
 
