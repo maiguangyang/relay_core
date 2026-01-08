@@ -43,6 +43,13 @@ final autoCoord = AutoCoordinator(
     onRequestBotToken: (roomId) async {   // 动态获取 Bot Token
       return await api.getBotToken(roomId);
     },
+    // 带宽优化回调：当 P2P 可用时取消云端订阅，避免双重拉流
+    onCloudSubscriptionChanged: (peerId, shouldSubscribe) {
+      // peerId: 屏幕共享者 ID
+      // shouldSubscribe: true=恢复云端订阅, false=取消云端订阅
+      final pub = findScreenSharePublication(peerId);
+      shouldSubscribe ? pub?.subscribe() : pub?.unsubscribe();
+    },
   ),
 );
 

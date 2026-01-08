@@ -64,6 +64,8 @@ class RelayService {
         // 可选: 影子连接配置
         // livekitUrl: 'wss://...',
         // onRequestBotToken: (roomId) async => await getBotToken(roomId),
+        // 可选: 带宽优化回调 (P2P 可用时取消云端订阅)
+        // onCloudSubscriptionChanged: (peerId, shouldSubscribe) { ... },
       ),
     );
     
