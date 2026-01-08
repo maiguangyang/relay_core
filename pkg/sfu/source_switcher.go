@@ -132,15 +132,33 @@ func (ss *SourceSwitcher) GetAudioTrack() *webrtc.TrackLocalStaticRTP {
 
 // SetVideoCodec 设置视频编解码器（从远端轨道获取完整参数）
 // 解决画质模糊问题：使用远端轨道的完整编码参数而不是默认的最小配置
+// 优化：只在 codec 真正变化时才创建新 track，避免 SSRC 变化导致黑屏
 func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	var callback func(*webrtc.TrackLocalStaticRTP, *webrtc.TrackLocalStaticRTP)
 	var videoTrack, audioTrack *webrtc.TrackLocalStaticRTP
+	var needNewTrack bool
 
 	ss.mu.Lock()
 	if ss.closed {
 		ss.mu.Unlock()
 		return ErrForwarderClosed
 	}
+
+	// 检查 codec 是否真的变化了
+	// 如果当前 track 的 MimeType 和新 codec 相同，则不需要创建新 track
+	currentCodec := ss.videoTrack.Codec()
+	if currentCodec.MimeType == codec.MimeType {
+		// codec 没有变化，不需要创建新 track，直接返回
+		// 这避免了 SSRC 变化导致接收端解码失败
+		ss.mu.Unlock()
+		utils.Info("[Switcher] Video codec unchanged (%s), skipping track recreation", codec.MimeType)
+		return nil
+	}
+
+	// codec 变化了，需要创建新 track
+	needNewTrack = true
+	utils.Info("[Switcher] Video codec changed from %s to %s, creating new track",
+		currentCodec.MimeType, codec.MimeType)
 
 	// 创建新的视频 Track，使用完整的编码参数
 	newTrack, err := webrtc.NewTrackLocalStaticRTP(
@@ -161,7 +179,7 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	ss.mu.Unlock()
 
 	// 在锁外触发回调，避免死锁
-	if callback != nil {
+	if needNewTrack && callback != nil {
 		utils.Info("[Switcher] Triggering OnTrackChanged callback for video codec: %s", codec.MimeType)
 		callback(videoTrack, audioTrack)
 	}
