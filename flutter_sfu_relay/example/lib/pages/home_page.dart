@@ -371,6 +371,31 @@ class _HomePageState extends State<HomePage> {
           debugPrint(
             '[ScreenShare] Screen share changed: sharer = $sharerPeerId, isLocalSharing = ${_autoCoord?.isLocalScreenSharing}',
           );
+
+          // 关键修复：当远程用户开始屏幕共享时，如果 P2P 已连接，
+          // Go 层使用 ReplaceTrack 而不是添加新 track，
+          // 这不会触发 Flutter 的 onTrack 回调。
+          // 需要重新设置渲染器的 srcObject 来强制刷新。
+          if (sharerPeerId != null &&
+              sharerPeerId != _localParticipant?.identity &&
+              _hasP2PVideo &&
+              _p2pVideoRenderer != null &&
+              _p2pRemoteStream != null) {
+            debugPrint(
+              '[ScreenShare] Resetting P2P renderer for new screen share',
+            );
+            // 先设置为 null，然后重新设置，强制渲染器刷新
+            _p2pVideoRenderer!.srcObject = null;
+            Future.microtask(() {
+              if (mounted && _p2pRemoteStream != null) {
+                _p2pVideoRenderer!.srcObject = _p2pRemoteStream;
+                setState(() {
+                  _p2pFirstFrameRendered = false; // 重置首帧状态，等待新的首帧
+                });
+              }
+            });
+          }
+
           _updateParticipants();
         }
       });
