@@ -385,23 +385,41 @@ class _HomePageState extends State<HomePage> {
               '[ScreenShare] Reinitializing P2P renderer for new screen share',
             );
 
+            // 调试：打印 stream 和 track 信息
+            final stream = _p2pRemoteStream!;
+            final videoTracks = stream.getVideoTracks();
+            final audioTracks = stream.getAudioTracks();
+            debugPrint(
+              '[ScreenShare] Stream ID: ${stream.id}, '
+              'videoTracks: ${videoTracks.length}, audioTracks: ${audioTracks.length}',
+            );
+            for (final track in videoTracks) {
+              debugPrint(
+                '[ScreenShare] Video track: id=${track.id}, '
+                'enabled=${track.enabled}, muted=${track.muted}, '
+                'kind=${track.kind}',
+              );
+            }
+
             // 立即显示加载指示器
             setState(() {
               _p2pFirstFrameRendered = false;
             });
 
-            // 保存旧渲染器和流
+            // 保存旧渲染器
             final oldRenderer = _p2pVideoRenderer;
-            final stream = _p2pRemoteStream;
+
+            // 先清理旧渲染器的 srcObject，确保它不再接收帧
+            oldRenderer?.srcObject = null;
 
             // 创建新渲染器
             _p2pVideoRenderer = RTCVideoRenderer();
-            _p2pVideoRenderer!.initialize().then((_) {
+            _p2pVideoRenderer!.initialize().then((_) async {
               if (!mounted) return;
 
               final renderer = _p2pVideoRenderer!;
 
-              // 方案 1: onFirstFrameRendered（首次有效，后续可能不触发）
+              // 方案 1: onFirstFrameRendered
               renderer.onFirstFrameRendered = () {
                 debugPrint('[P2P] First video frame rendered! (after reinit)');
                 if (mounted && !_p2pFirstFrameRendered) {
@@ -412,8 +430,6 @@ class _HomePageState extends State<HomePage> {
               };
 
               // 方案 2: 监听 RTCVideoValue 变化
-              // RTCVideoRenderer 是 ValueNotifier<RTCVideoValue>
-              // 当有视频帧时，value.width 和 value.height 会被设置
               void checkVideoValue() {
                 if (!mounted) return;
                 final value = renderer.value;
@@ -430,8 +446,11 @@ class _HomePageState extends State<HomePage> {
               }
 
               renderer.addListener(checkVideoValue);
-              // 检查初始值（可能已经有帧了）
               checkVideoValue();
+
+              // 延迟设置 stream，给 Go 层的 ReplaceTrack 时间完成
+              await Future.delayed(const Duration(milliseconds: 200));
+              if (!mounted) return;
 
               // 设置流
               renderer.srcObject = stream;
@@ -443,9 +462,8 @@ class _HomePageState extends State<HomePage> {
               setState(() {});
             });
 
-            // 清理旧渲染器（稍后进行，避免闪烁）
-            Future.delayed(const Duration(milliseconds: 100), () {
-              oldRenderer?.srcObject = null;
+            // 清理旧渲染器（异步进行，避免闪烁）
+            Future.delayed(const Duration(milliseconds: 300), () {
               oldRenderer?.dispose();
             });
           }
