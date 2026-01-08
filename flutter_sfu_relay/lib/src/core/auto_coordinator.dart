@@ -1091,6 +1091,26 @@ class AutoCoordinator {
         }
         break;
 
+      case SfuEventType.renegotiate:
+        // Go 层 ReplaceTrack 后需要重协商，将新 Offer 发送给订阅者
+        // 这解决了重复屏幕共享后订阅者黑屏的问题
+        if (event.data != null && event.peerId.isNotEmpty) {
+          print(
+            '[Relay] Sending renegotiation offer to subscriber: ${event.peerId}',
+          );
+          // event.data 是 JSON: {"type":"offer","sdp":"..."}
+          try {
+            final data = jsonDecode(event.data!);
+            final sdp = data['sdp'] as String? ?? '';
+            if (sdp.isNotEmpty) {
+              signaling.sendOffer(roomId, event.peerId, sdp);
+            }
+          } catch (e) {
+            print('[Relay] Failed to parse renegotiation offer: $e');
+          }
+        }
+        break;
+
       case SfuEventType.error:
         _errorController.add(event.data ?? 'Unknown error');
         break;
