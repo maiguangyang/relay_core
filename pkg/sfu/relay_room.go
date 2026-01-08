@@ -504,9 +504,6 @@ func (r *RelayRoom) UpdateTracks(videoTrack, audioTrack *webrtc.TrackLocalStatic
 					utils.Error("[RelayRoom] ReplaceTrack failed for %s: %v", sub.id, err)
 				} else {
 					utils.Info("[RelayRoom] ReplaceTrack success for %s", sub.id)
-					// ReplaceTrack 成功后需要重协商，通知 Flutter 层更新 stream
-					// 这解决了重复屏幕共享后黑屏的问题
-					needRenegotiate = true
 				}
 			} else {
 				// 没有 sender，需要动态添加 track 并重协商
