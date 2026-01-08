@@ -563,6 +563,17 @@ func (r *RelayRoom) UpdateTracks(videoTrack, audioTrack *webrtc.TrackLocalStatic
 			}
 		}
 	}
+
+	// 所有订阅者的 Track 替换完成后，请求关键帧
+	// 这确保 B 在 A 重新开始屏幕共享后能收到 I-frame
+	if len(subscribers) > 0 && videoTrack != nil {
+		go func() {
+			// 延迟 100ms 让 RTP 流稳定
+			time.Sleep(100 * time.Millisecond)
+			utils.Info("[RelayRoom] Requesting keyframe after track replacement for %d subscribers", len(subscribers))
+			r.emitKeyframeRequest()
+		}()
+	}
 }
 
 // GetSubscribers 获取所有订阅者 ID
