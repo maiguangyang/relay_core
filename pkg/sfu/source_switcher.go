@@ -148,10 +148,18 @@ func (ss *SourceSwitcher) SetVideoCodec(codec webrtc.RTPCodecCapability) error {
 	// 如果当前 track 的 MimeType 和新 codec 相同，则不需要创建新 track
 	currentCodec := ss.videoTrack.Codec()
 	if currentCodec.MimeType == codec.MimeType {
-		// codec 没有变化，不需要创建新 track，直接返回
-		// 这避免了 SSRC 变化导致接收端解码失败
+		// codec 没有变化，不需要创建新 track
+		// 但仍需触发回调以请求关键帧，确保订阅者能正常解码新的视频流
+		utils.Info("[Switcher] Video codec unchanged (%s), reusing track but triggering callback", codec.MimeType)
+		callback = ss.onTrackChanged
+		videoTrack = ss.videoTrack
+		audioTrack = ss.audioTrack
 		ss.mu.Unlock()
-		utils.Info("[Switcher] Video codec unchanged (%s), skipping track recreation", codec.MimeType)
+
+		// 触发回调，这会导致 ReplaceTrack（替换同一个 track，无操作）并请求关键帧
+		if callback != nil {
+			callback(videoTrack, audioTrack)
+		}
 		return nil
 	}
 
