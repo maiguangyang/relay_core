@@ -371,6 +371,13 @@ class _HomePageState extends State<HomePage> {
           debugPrint(
             '[ScreenShare] Screen share changed: sharer = $sharerPeerId, isLocalSharing = ${_autoCoord?.isLocalScreenSharing}',
           );
+          // 新的屏幕共享开始时，重置首帧状态
+          // 这样 B 在等待 A 的新屏幕共享首帧时会显示加载指示器
+          if (sharerPeerId != null) {
+            setState(() {
+              _p2pFirstFrameRendered = false;
+            });
+          }
           _updateParticipants();
         }
       });
@@ -593,7 +600,6 @@ class _HomePageState extends State<HomePage> {
       }
 
       // 检测屏幕共享参与者
-      final previousScreenShareParticipant = _screenShareParticipant;
       _screenShareParticipant = null;
       for (final p in _participants) {
         final isLocal = p.identity == _localParticipant?.identity;
@@ -642,18 +648,7 @@ class _HomePageState extends State<HomePage> {
           }
         }
       }
-
-      // 如果屏幕共享结束且用户处于全屏模式，自动退出全屏
-      if (previousScreenShareParticipant != null &&
-          _screenShareParticipant == null &&
-          _isScreenShareFullscreen) {
-        // 需要在 setState 外部调用，避免无限循环
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _exitFullscreen();
-          }
-        });
-      }
+      // 注意：不再自动退出全屏，由用户手动控制窗口大小
     });
   }
 
@@ -701,6 +696,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _disconnect() async {
     // 停止统计监控
     _stopStatsMonitor();
+
+    // 立即清除屏幕共享状态，防止离开时显示加载指示器
+    _screenShareParticipant = null;
 
     // 1. 先停止 AutoCoordinator（包含信令清理）
     if (_autoCoord != null) {
