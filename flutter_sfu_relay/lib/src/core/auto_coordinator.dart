@@ -169,6 +169,7 @@ class AutoCoordinator {
   // 选举失败降级机制
   int _electionFailureCount = 0;
   bool _relayModeDisabled = false;
+  bool _bridgeCreated = false; // 是否已创建 LiveKit 桥接器（用于资源清理）
   Timer? _recoveryTimer;
 
   final Set<String> _peers = {};
@@ -359,8 +360,9 @@ class AutoCoordinator {
     // _keepalive?.destroy();
     // _keepalive = null;
 
-    // 如果是 Relay，断开 Go 层 LiveKit 连接
-    if (isRelay) {
+    // 确保清理 FFI 资源
+    // 即使 isRelay 状态不准确，只要 bridge 创建过就必须销毁
+    if (_bridgeCreated || isRelay) {
       _disconnectLiveKitBridge();
     }
 
@@ -968,6 +970,8 @@ class AutoCoordinator {
     try {
       // 动态请求 Bot Token
       final botToken = await config.onRequestBotToken!(roomId);
+      if (_disposed) return; // Prevent leak if disposed during await
+
       if (botToken == null || botToken.isEmpty) {
         // 回调返回空，不启动影子连接
         return;
@@ -982,6 +986,11 @@ class AutoCoordinator {
           '[AutoCoordinator] connecting native bridge to $urlPtr with token length ${botToken.length}',
         );
 
+        // 防御性编程：先清理可能存在的旧资源（防止 map 覆盖导致泄漏）
+        // 忽略错误，因为如果不存在自然最好
+        bindings.LiveKitBridgeDestroy(roomPtr);
+        bindings.RelayRoomDestroy(roomPtr);
+
         // 1. 创建 RelayRoom (P2P 服务端)
         final iceServersPtr = toCString('[]');
         try {
@@ -993,6 +1002,7 @@ class AutoCoordinator {
 
         // 2. 创建桥接器 (影子连接)
         bindings.LiveKitBridgeCreate(roomPtr);
+        _bridgeCreated = true; // 标记桥接器已创建
         print('[AutoCoordinator] LiveKitBridgeCreate done');
 
         // 3. 连接到 LiveKit SFU (Go 层异步执行)
@@ -1020,6 +1030,7 @@ class AutoCoordinator {
 
       // 2. 销毁 RelayRoom
       bindings.RelayRoomDestroy(roomPtr);
+      _bridgeCreated = false; // 标记桥接器已销毁
       print('[AutoCoordinator] LiveKitBridge & RelayRoom destroyed');
     } finally {
       calloc.free(roomPtr);
