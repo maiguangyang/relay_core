@@ -394,6 +394,12 @@ class AutoCoordinator {
       _currentRelayScore = 0;
       triggerElection();
     }
+
+    // 如果离开的是屏幕共享者，清除屏幕共享状态
+    if (_screenSharerPeerId == peerId) {
+      _screenSharerPeerId = null;
+      _screenShareChangedController.add(null);
+    }
   }
 
   /// 手动触发选举

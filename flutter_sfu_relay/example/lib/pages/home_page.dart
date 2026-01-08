@@ -695,6 +695,18 @@ class _HomePageState extends State<HomePage> {
     // 停止统计监控
     _stopStatsMonitor();
 
+    // 0. 如果正在屏幕共享，先停止
+    if (_controlState.screenShareEnabled) {
+      try {
+        await _localParticipant?.setScreenShareEnabled(false);
+        if (Platform.isMacOS || Platform.isWindows) {
+          await ScreenCaptureChannel.hideScreenShareUI();
+        }
+      } catch (e) {
+        debugPrint('Error stopping local screen share: $e');
+      }
+    }
+
     // 1. 先停止 AutoCoordinator（包含信令清理）
     if (_autoCoord != null) {
       try {
