@@ -399,18 +399,42 @@ class _HomePageState extends State<HomePage> {
             _p2pVideoRenderer!.initialize().then((_) {
               if (!mounted) return;
 
-              // 设置新的首帧回调
-              _p2pVideoRenderer!.onFirstFrameRendered = () {
+              final renderer = _p2pVideoRenderer!;
+
+              // 方案 1: onFirstFrameRendered（首次有效，后续可能不触发）
+              renderer.onFirstFrameRendered = () {
                 debugPrint('[P2P] First video frame rendered! (after reinit)');
-                if (mounted) {
+                if (mounted && !_p2pFirstFrameRendered) {
                   setState(() {
                     _p2pFirstFrameRendered = true;
                   });
                 }
               };
 
+              // 方案 2: 监听 RTCVideoValue 变化
+              // RTCVideoRenderer 是 ValueNotifier<RTCVideoValue>
+              // 当有视频帧时，value.width 和 value.height 会被设置
+              void checkVideoValue() {
+                if (!mounted) return;
+                final value = renderer.value;
+                if (value.width > 0 &&
+                    value.height > 0 &&
+                    !_p2pFirstFrameRendered) {
+                  debugPrint(
+                    '[P2P] Video dimensions detected: ${value.width}x${value.height}',
+                  );
+                  setState(() {
+                    _p2pFirstFrameRendered = true;
+                  });
+                }
+              }
+
+              renderer.addListener(checkVideoValue);
+              // 检查初始值（可能已经有帧了）
+              checkVideoValue();
+
               // 设置流
-              _p2pVideoRenderer!.srcObject = stream;
+              renderer.srcObject = stream;
               debugPrint(
                 '[ScreenShare] New renderer initialized and stream set',
               );
