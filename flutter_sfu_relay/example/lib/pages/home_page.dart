@@ -2214,24 +2214,41 @@ class _HomePageState extends State<HomePage> {
   Widget _buildP2PLoadingIndicator({String? message}) {
     return Container(
       color: Colors.black,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
-              strokeWidth: 2,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 根据容器宽度自适应大小
+          final width = constraints.maxWidth;
+          final spinnerSize = (width * 0.08).clamp(24.0, 48.0);
+          final fontSize = (width * 0.04).clamp(14.0, 24.0);
+          final spacing = (width * 0.03).clamp(12.0, 24.0);
+
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: spinnerSize,
+                  height: spinnerSize,
+                  child: CircularProgressIndicator(
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Colors.white54,
+                    ),
+                    strokeWidth: (spinnerSize / 12).clamp(2.0, 4.0),
+                  ),
+                ),
+                SizedBox(height: spacing),
+                Text(
+                  message ?? (_hasP2PVideo ? '正在等待视频画面...' : '正在建立局域网连接...'),
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: fontSize,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              message ?? (_hasP2PVideo ? '正在等待视频画面...' : '正在建立局域网连接...'),
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
