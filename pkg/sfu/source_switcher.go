@@ -265,13 +265,15 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 		return err
 	}
 
-	// 选择对应的 Track
+	// 获取当前的 Track 引用（需要加锁，因为 SetVideoCodec 可能正在更新）
+	ss.mu.RLock()
 	var track *webrtc.TrackLocalStaticRTP
 	if isVideo {
 		track = ss.videoTrack
 	} else {
 		track = ss.audioTrack
 	}
+	ss.mu.RUnlock()
 
 	if track == nil {
 		return nil
