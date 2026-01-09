@@ -429,7 +429,17 @@ func RelayRoomInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, data
 		return C.int(-1)
 	}
 
-	goData := C.GoBytes(data, dataLen)
+	// 使用 Pool 优化内存分配 (避免 C.GoBytes 的新分配)
+	length := int(dataLen)
+	goData := utils.GetBuffer(length) // 从 Pool 获取
+	defer utils.PutBuffer(goData)     // 确保归还
+
+	// 零拷贝视图 (从 C 内存复制到 Go Pool Buffer)
+	// 注意：这里必须复制，因为 C 内存的所有权在外部，且 goData 将被传入 Pion
+	// Pion 内部会再次 Marshal (复制)，所以 goData 在函数返回后可以安全复用
+	src := (*[1 << 30]byte)(data)[:length:length]
+	copy(goData, src)
+
 	if err := switcher.InjectSFUPacket(isVideo != 0, goData); err != nil {
 		return C.int(-1)
 	}
@@ -453,7 +463,13 @@ func RelayRoomInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 		return C.int(-1)
 	}
 
-	goData := C.GoBytes(data, dataLen)
+	length := int(dataLen)
+	goData := utils.GetBuffer(length)
+	defer utils.PutBuffer(goData)
+
+	src := (*[1 << 30]byte)(data)[:length:length]
+	copy(goData, src)
+
 	if err := switcher.InjectLocalPacket(isVideo != 0, goData); err != nil {
 		return C.int(-1)
 	}
