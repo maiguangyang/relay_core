@@ -197,6 +197,10 @@ class AutoCoordinator {
   // ICE 候选缓存队列 (用于解决 Candidates 先于 Answer 到达的竞争条件)
   final List<RTCIceCandidate> _pendingIceCandidates = [];
 
+  // Relay 侧缓冲逻辑
+  final Set<String> _activeRelaySubscribers = {};
+  final Map<String, List<String>> _pendingRelayCandidates = {};
+
   // 事件流
   final _stateController = StreamController<AutoCoordinatorState>.broadcast();
   final _relayChangedController = StreamController<String>.broadcast();
@@ -771,6 +775,11 @@ class AutoCoordinator {
 
   void _handlePeerLeft(String peerId) {
     _peers.remove(peerId);
+
+    // 清理 Relay 侧的状态
+    _activeRelaySubscribers.remove(peerId);
+    _pendingRelayCandidates.remove(peerId);
+
     _coordinator.removePeer(peerId);
     _coordinator.removePeer(peerId);
     // _keepalive?.removePeer(peerId); // Go 层自动处理
@@ -1042,7 +1051,10 @@ class AutoCoordinator {
   }
 
   /// 断开 Go 层 LiveKit 桥接器
-  void _disconnectLiveKitBridge() {
+  Future<void> _disconnectLiveKitBridge() async {
+    _bridgeCreated = false;
+    _activeRelaySubscribers.clear();
+    _pendingRelayCandidates.clear();
     final roomPtr = toCString(roomId);
     try {
       // 1. 断开并销毁 Bridge
@@ -1446,6 +1458,14 @@ class AutoCoordinator {
   Future<void> _handleP2PAnswer(String peerId, String sdp) async {
     if (_p2pConnection == null) return;
 
+    // 如果已经在 Stable 状态，说明可能处理过 Answer 了，忽略重复 Answer
+    // 或者是重试逻辑中的竞态条件
+    if (_p2pConnection!.signalingState ==
+        RTCSignalingState.RTCSignalingStateStable) {
+      print('[P2P] Ignoring answer in Stable state');
+      return;
+    }
+
     try {
       await _p2pConnection!.setRemoteDescription(
         RTCSessionDescription(sdp, 'answer'),
@@ -1530,6 +1550,20 @@ class AutoCoordinator {
           // 发送 Answer 给订阅者
           signaling.sendAnswer(roomId, subscriberId, answerSdp);
           print('[Relay] Sent answer to subscriber: $subscriberId');
+
+          // 标记为活跃订阅者
+          _activeRelaySubscribers.add(subscriberId);
+
+          // 处理缓冲的 ICE 候选
+          final pending = _pendingRelayCandidates.remove(subscriberId);
+          if (pending != null) {
+            print(
+              '[Relay] Flushing ${pending.length} buffered candidates for $subscriberId',
+            );
+            for (final candidateStr in pending) {
+              _processRelayCandidate(subscriberId, candidateStr);
+            }
+          }
         } else {
           print(
             '[Relay] Failed to create answer for subscriber: $subscriberId',
@@ -1561,7 +1595,34 @@ class AutoCoordinator {
       final roomPtr = toCString(roomId);
       final peerPtr = toCString(subscriberId);
       final candidatePtr = toCString(candidateJsonStr);
+      print('[Relay] Received ICE candidate from Subscriber: $subscriberId');
+
+      if (!_activeRelaySubscribers.contains(subscriberId)) {
+        print(
+          '[Relay] Subscriber not ready, buffering candidate for $subscriberId',
+        );
+        _pendingRelayCandidates
+            .putIfAbsent(subscriberId, () => [])
+            .add(candidateJsonStr);
+        calloc.free(roomPtr);
+        calloc.free(peerPtr);
+        calloc.free(candidatePtr);
+        return;
+      }
+
       print('[Relay] Adding ICE candidate from Subscriber: $subscriberId');
+      _processRelayCandidate(subscriberId, candidateJsonStr);
+    } catch (e) {
+      print('[Relay] Error handling ICE candidate from subscriber: $e');
+    }
+  }
+
+  /// 实际调用 Go 层添加 ICE 候选的辅助方法
+  void _processRelayCandidate(String subscriberId, String candidateJsonStr) {
+    try {
+      final roomPtr = toCString(roomId);
+      final peerPtr = toCString(subscriberId);
+      final candidatePtr = toCString(candidateJsonStr);
 
       try {
         bindings.RelayRoomAddICECandidate(roomPtr, peerPtr, candidatePtr);
@@ -1571,7 +1632,7 @@ class AutoCoordinator {
         calloc.free(candidatePtr);
       }
     } catch (e) {
-      print('[Relay] Error handling ICE candidate from subscriber: $e');
+      print('[Relay] Error adding ICE candidate: $e');
     }
   }
 }
