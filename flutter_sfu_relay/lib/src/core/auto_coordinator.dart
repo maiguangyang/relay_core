@@ -190,6 +190,13 @@ class AutoCoordinator {
   String? _screenSharerPeerId; // 当前屏幕共享者的 ID
   bool _isLocalScreenSharing = false; // 本机是否正在屏幕共享
 
+  Timer? _connectionRetryTimer; // P2P 连接重试定时器
+  int _connectionRetryCount = 0;
+  static const int _maxConnectionRetries = 3;
+
+  // ICE 候选缓存队列 (用于解决 Candidates 先于 Answer 到达的竞争条件)
+  final List<RTCIceCandidate> _pendingIceCandidates = [];
+
   // 事件流
   final _stateController = StreamController<AutoCoordinatorState>.broadcast();
   final _relayChangedController = StreamController<String>.broadcast();
@@ -1276,7 +1283,10 @@ class AutoCoordinator {
   // ========== P2P 订阅者连接 ==========
 
   /// 创建到 Relay 的 P2P 连接（订阅者使用）
-  Future<void> _createP2PConnectionToRelay(String relayId) async {
+  Future<void> _createP2PConnectionToRelay(
+    String relayId, {
+    bool isRetry = false,
+  }) async {
     // 只有局域网设备才能使用 P2P
     if (!isOnLan) {
       print('[P2P] Not on LAN, skipping P2P connection');
@@ -1285,6 +1295,22 @@ class AutoCoordinator {
 
     // Relay 不需要创建 P2P 连接
     if (isRelay) return;
+
+    if (!isRetry) {
+      _connectionRetryCount = 0;
+    } else {
+      if (_connectionRetryCount >= _maxConnectionRetries) {
+        print('[P2P] Max retries reached for relay $relayId, giving up');
+        _errorController.add(
+          'Failed to connect to Relay $relayId after $_maxConnectionRetries attempts',
+        );
+        return;
+      }
+      _connectionRetryCount++;
+      print(
+        '[P2P] Retrying connection to relay $relayId (Attempt $_connectionRetryCount/$_maxConnectionRetries)',
+      );
+    }
 
     // 如果已有连接，先关闭
     await _closeP2PConnection();
@@ -1374,14 +1400,35 @@ class AutoCoordinator {
       // 发送 Offer 给 Relay
       signaling.sendOffer(roomId, relayId, offer.sdp!);
       print('[P2P] Sent offer to Relay: $relayId');
+
+      // 设置超时重试定时器
+      _connectionRetryTimer?.cancel();
+      _connectionRetryTimer = Timer(const Duration(seconds: 5), () {
+        if (!_p2pConnected && _currentRelay == relayId) {
+          print(
+            '[P2P] Connection timed out for relay $relayId, triggering retry...',
+          );
+          _createP2PConnectionToRelay(relayId, isRetry: true);
+        }
+      });
     } catch (e) {
       print('[P2P] Failed to create P2P connection: $e');
       _errorController.add('P2P connection failed: $e');
+
+      // 异常情况下也尝试重试
+      if (_currentRelay == relayId) {
+        Timer(const Duration(seconds: 2), () {
+          _createP2PConnectionToRelay(relayId, isRetry: true);
+        });
+      }
     }
   }
 
   /// 关闭 P2P 连接
   Future<void> _closeP2PConnection() async {
+    _connectionRetryTimer?.cancel();
+    _connectionRetryTimer = null;
+
     if (_p2pConnection != null) {
       await _p2pConnection!.close();
       _p2pConnection = null;
@@ -1392,6 +1439,7 @@ class AutoCoordinator {
     if (!_disposed) {
       _remoteStreamController.add(null);
     }
+    _pendingIceCandidates.clear();
   }
 
   /// 处理 Answer（订阅者收到 Relay 的 Answer）
@@ -1403,6 +1451,21 @@ class AutoCoordinator {
         RTCSessionDescription(sdp, 'answer'),
       );
       print('[P2P] Set remote description from Relay: $peerId');
+
+      // 处理缓冲的 ICE 候选
+      if (_pendingIceCandidates.isNotEmpty) {
+        print(
+          '[P2P] Processing ${_pendingIceCandidates.length} buffered ICE candidates',
+        );
+        for (final candidate in _pendingIceCandidates) {
+          try {
+            await _p2pConnection!.addCandidate(candidate);
+          } catch (e) {
+            print('[P2P] Failed to add buffered candidate: $e');
+          }
+        }
+        _pendingIceCandidates.clear();
+      }
     } catch (e) {
       print('[P2P] Failed to set remote description: $e');
     }
@@ -1422,6 +1485,16 @@ class AutoCoordinator {
         map['sdpMid'],
         map['sdpMLineIndex'],
       );
+
+      // 如果 RemoteDescription 还没设置，先缓存
+      if (await _p2pConnection!.getRemoteDescription() == null) {
+        print(
+          '[P2P] Remote description not set, buffering candidate: ${candidate.candidate}',
+        );
+        _pendingIceCandidates.add(candidate);
+        return;
+      }
+
       print('[P2P] Adding ICE candidate from Relay: ${candidate.candidate}');
       await _p2pConnection!.addCandidate(candidate);
     } catch (e) {
