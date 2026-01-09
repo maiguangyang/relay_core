@@ -844,8 +844,22 @@ class AutoCoordinator {
     // 「先到先得」逻辑：如果我们正在选举中（已广播 claim，等待超时），
     // 则不向后来的节点让位，无论其分数高低。
     // 这样可以避免新加入的节点抢占正在选举的节点。
+    // 「先到先得」逻辑修正：即使在选举中，如果对方分数更高，我们也应该让位，
+    // 以确保高性能节点（如 macOS）能当选，而不是仅仅看谁先超时。
     if (_state == AutoCoordinatorState.electing) {
-      // 我们正在选举，不让位。告知对方我们的存在。
+      if (claimerScore > _localScore) {
+        // 对方分数更高，让位
+        _acceptRelay(claimerId, epoch, claimerScore);
+        return;
+      } else if (claimerScore == _localScore &&
+          claimerId.compareTo(localPeerId) > 0) {
+        // 分数相同，ID 更大，让位
+        _acceptRelay(claimerId, epoch, claimerScore);
+        return;
+      }
+
+      // 对方分数不如我们，或者相同但我们 ID 更大
+      // 坚持我们的 Claim，告知对方
       signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
       return;
     }
