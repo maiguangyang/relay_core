@@ -1330,7 +1330,7 @@ class AutoCoordinator {
 
       // 监听连接状态
       _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) {
-        print('[P2P] Connection state: $state');
+        print('[P2P] Connection state changed: $state for relay $relayId');
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
           print('[P2P] Remote stream connected! Ready to render.');
           _p2pConnected = true;
@@ -1363,7 +1363,12 @@ class AutoCoordinator {
       };
 
       // 创建 Offer
-      final offer = await _p2pConnection!.createOffer();
+      // 强制 iceRestart，确保在频繁切换 Relay 时不会复用旧的失效路径
+      final offer = await _p2pConnection!.createOffer({
+        'iceRestart': true,
+        'offerToReceiveVideo': true,
+        'offerToReceiveAudio': true,
+      });
       await _p2pConnection!.setLocalDescription(offer);
 
       // 发送 Offer 给 Relay
@@ -1425,25 +1430,12 @@ class AutoCoordinator {
   }
 
   /// Relay 处理订阅者的 Offer
-  Future<void> _handleOfferFromSubscriber(
+  void _handleOfferFromSubscriber(
     String subscriberId,
     Map<String, dynamic>? data,
-  ) async {
+  ) {
     // 只有 Relay 才处理 Offer
     if (!isRelay) return;
-
-    // 等待 Bridge 初始化（防竞态：获取 Token 耗时导致 Bridge 未就绪）
-    int attempts = 0;
-    while (!_bridgeCreated && attempts < 50) {
-      if (!isRelay || _disposed) return;
-      await Future.delayed(const Duration(milliseconds: 100));
-      attempts++;
-    }
-
-    if (!_bridgeCreated) {
-      print('[Relay] Bridge not ready, cannot handle offer from $subscriberId');
-      return;
-    }
 
     final sdp = data?['sdp'] as String?;
     if (sdp == null) return;
@@ -1481,31 +1473,16 @@ class AutoCoordinator {
   }
 
   /// Relay 处理订阅者的 ICE 候选
-  Future<void> _handleCandidateFromSubscriber(
+  void _handleCandidateFromSubscriber(
     String subscriberId,
     Map<String, dynamic>? data,
-  ) async {
+  ) {
     // 只有 Relay 才处理
     if (!isRelay) return;
 
     // data['candidate'] 是 JSON 字符串
     final candidateJsonStr = data?['candidate'] as String?;
     if (candidateJsonStr == null) return;
-
-    // 等待 Bridge 初始化
-    int attempts = 0;
-    while (!_bridgeCreated && attempts < 50) {
-      if (!isRelay || _disposed) return;
-      await Future.delayed(const Duration(milliseconds: 100));
-      attempts++;
-    }
-
-    if (!_bridgeCreated) {
-      print(
-        '[Relay] Bridge not ready, cannot handle ICE candidate from $subscriberId',
-      );
-      return;
-    }
 
     try {
       final roomPtr = toCString(roomId);
