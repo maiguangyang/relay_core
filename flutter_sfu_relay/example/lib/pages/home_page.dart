@@ -977,7 +977,6 @@ class _HomePageState extends State<HomePage> {
                 maxFramerate: maxFramerate,
               ),
               simulcast: false, // 禁用 simulcast，避免低质量层级
-              videoCodec: 'h264', // 强制 H.264 (推荐保留，硬件解码效率更高)
             ),
           );
 
