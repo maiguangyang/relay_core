@@ -42,9 +42,9 @@ type CoordinatorConfig struct {
 func DefaultCoordinatorConfig() CoordinatorConfig {
 	return CoordinatorConfig{
 		KeepaliveInterval:        3 * time.Second,
-		KeepaliveTimeout:         10 * time.Second,
+		KeepaliveTimeout:         20 * time.Second, // 增加到 20s，提高对网络波动的容忍度
 		FailoverBackoffPerPoint:  10 * time.Millisecond,
-		FailoverOfflineThreshold: 2,
+		FailoverOfflineThreshold: 4, // 增加到 4 次重试，防止误判
 		ElectionInterval:         5 * time.Second,
 	}
 }

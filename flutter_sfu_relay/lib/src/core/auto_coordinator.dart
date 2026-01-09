@@ -1079,7 +1079,22 @@ class AutoCoordinator {
     if (relayId.isEmpty || relayId == localPeerId) return;
 
     // 只忽略明显过期的 epoch（小于当前 epoch），相同 epoch 仍需处理
-    if (epoch < _currentEpoch) return;
+    if (epoch < _currentEpoch) {
+      // 关键修复：如果对方 Epoch 落后（例如刚重启），我们需要告诉它当前的正确 Epoch
+      // 否则它会以为自己是 Relay，导致脑裂
+      if (_currentRelay == localPeerId) {
+        print(
+          '[AutoCoordinator] Received stale Relay claim from $relayId (Epoch $epoch < $_currentEpoch). Sending correction.',
+        );
+        signaling.sendRelayChanged(
+          roomId,
+          localPeerId,
+          _currentEpoch,
+          _localScore,
+        );
+      }
+      return;
+    }
 
     // 更新 epoch 如果更高
     if (epoch > _currentEpoch) {
@@ -1087,18 +1102,32 @@ class AutoCoordinator {
     }
 
     // 如果我们当前是 Relay，需要比较分数决定是否接受
+    const epsilon = 0.001;
+    final diff = score - _localScore;
+
     if (_currentRelay == localPeerId) {
-      // 对方分数更高，接受
-      if (score > _localScore) {
+      // 对方分数显著更高，接受
+      if (diff > epsilon) {
+        print(
+          '[AutoCoordinator] Relay conflict: Remote score ($score) > Local ($_localScore), accepting new relay $relayId',
+        );
         _acceptRelay(relayId, epoch, score);
         return;
       }
-      // 分数相同，比较 PeerId（字典序大的优先）
-      if (score == _localScore && relayId.compareTo(localPeerId) > 0) {
+
+      // 分数接近（视为相同），比较 PeerId（字典序大的优先）
+      if (diff.abs() <= epsilon && relayId.compareTo(localPeerId) > 0) {
+        print(
+          '[AutoCoordinator] Relay conflict: Scores equal ($score), Remote ID ($relayId) > Local ($localPeerId), accepting new relay',
+        );
         _acceptRelay(relayId, epoch, score);
         return;
       }
+
       // 我们分数更高或相同且 PeerId 更大，重新广播我们的 Relay 状态
+      print(
+        '[AutoCoordinator] Relay conflict: Rejecting $relayId ($score). Keeping local relay ($_localScore). Reason: ${diff < -epsilon ? "Local score higher" : "Local ID higher"}',
+      );
       signaling.sendRelayChanged(
         roomId,
         localPeerId,

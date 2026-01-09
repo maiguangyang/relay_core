@@ -917,16 +917,43 @@ class _HomePageState extends State<HomePage> {
 
           if (result == null) return;
 
-          // 使用高分辨率高码率发送屏幕共享
+          // 根据网络类型动态调整码率和帧率
+          // Ethernet: 5 Mbps / 60fps (最佳画质)
+          // WiFi: 2.5 Mbps / 30fps (平衡，防止拥塞)
+          // Others: 1.5 Mbps / 15fps (低带宽兼容)
+          int maxBitrate;
+          int maxFramerate;
+
+          if (_lastConnectionType == ConnectionType.ethernet) {
+            maxBitrate = 5 * 1000 * 1000;
+            maxFramerate = 60;
+            debugPrint(
+              '[ScreenShare] Network: Ethernet -> Using High Quality (5Mbps/60fps)',
+            );
+          } else if (_lastConnectionType == ConnectionType.wifi) {
+            maxBitrate = 2500000; // 2.5 Mbps
+            maxFramerate = 30;
+            debugPrint(
+              '[ScreenShare] Network: WiFi -> Using Balanced Quality (2.5Mbps/30fps)',
+            );
+          } else {
+            maxBitrate = 1500000; // 1.5 Mbps
+            maxFramerate = 15;
+            debugPrint(
+              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Low Bandwidth (1.5Mbps/15fps)',
+            );
+          }
+
+          // 使用动态参数创建 Track
           final track = await lk.LocalVideoTrack.createScreenShareTrack(
             lk.ScreenShareCaptureOptions(
               sourceId: result.source.id,
-              maxFrameRate: 60.0,
+              maxFrameRate: maxFramerate.toDouble(),
               params: lk.VideoParameters(
                 dimensions: const lk.VideoDimensions(1920, 1080),
                 encoding: lk.VideoEncoding(
-                  maxBitrate: 5000000, // 5 Mbps 高码率
-                  maxFramerate: 60,
+                  maxBitrate: maxBitrate,
+                  maxFramerate: maxFramerate,
                 ),
               ),
             ),
@@ -937,17 +964,20 @@ class _HomePageState extends State<HomePage> {
           debugPrint('[ScreenShare]   - Track SID: ${track.sid}');
           debugPrint('[ScreenShare]   - Source: ${result.source.id}');
           debugPrint('[ScreenShare]   - Is Screen: ${result.isScreen}');
-          debugPrint('[ScreenShare]   - Requested: 1920x1080 @ 60fps, 5Mbps');
+          debugPrint(
+            '[ScreenShare]   - Requested: 1920x1080 @ ${maxFramerate}fps, ${(maxBitrate / 1000000).toStringAsFixed(1)}Mbps',
+          );
 
-          // 禁用 simulcast 并设置高码率，避免开始时画面模糊
+          // 禁用 simulcast 并设置参数
           await _localParticipant!.publishVideoTrack(
             track,
             publishOptions: lk.VideoPublishOptions(
               videoEncoding: lk.VideoEncoding(
-                maxBitrate: 5 * 1000 * 1000, // 5 Mbps
-                maxFramerate: 60,
+                maxBitrate: maxBitrate,
+                maxFramerate: maxFramerate,
               ),
               simulcast: false, // 禁用 simulcast，避免低质量层级
+              videoCodec: 'h264', // 强制 H.264 (推荐保留，硬件解码效率更高)
             ),
           );
 
