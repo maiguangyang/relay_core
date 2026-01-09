@@ -1425,12 +1425,25 @@ class AutoCoordinator {
   }
 
   /// Relay 处理订阅者的 Offer
-  void _handleOfferFromSubscriber(
+  Future<void> _handleOfferFromSubscriber(
     String subscriberId,
     Map<String, dynamic>? data,
-  ) {
+  ) async {
     // 只有 Relay 才处理 Offer
     if (!isRelay) return;
+
+    // 等待 Bridge 初始化（防竞态：获取 Token 耗时导致 Bridge 未就绪）
+    int attempts = 0;
+    while (!_bridgeCreated && attempts < 50) {
+      if (!isRelay || _disposed) return;
+      await Future.delayed(const Duration(milliseconds: 100));
+      attempts++;
+    }
+
+    if (!_bridgeCreated) {
+      print('[Relay] Bridge not ready, cannot handle offer from $subscriberId');
+      return;
+    }
 
     final sdp = data?['sdp'] as String?;
     if (sdp == null) return;
@@ -1468,16 +1481,31 @@ class AutoCoordinator {
   }
 
   /// Relay 处理订阅者的 ICE 候选
-  void _handleCandidateFromSubscriber(
+  Future<void> _handleCandidateFromSubscriber(
     String subscriberId,
     Map<String, dynamic>? data,
-  ) {
+  ) async {
     // 只有 Relay 才处理
     if (!isRelay) return;
 
     // data['candidate'] 是 JSON 字符串
     final candidateJsonStr = data?['candidate'] as String?;
     if (candidateJsonStr == null) return;
+
+    // 等待 Bridge 初始化
+    int attempts = 0;
+    while (!_bridgeCreated && attempts < 50) {
+      if (!isRelay || _disposed) return;
+      await Future.delayed(const Duration(milliseconds: 100));
+      attempts++;
+    }
+
+    if (!_bridgeCreated) {
+      print(
+        '[Relay] Bridge not ready, cannot handle ICE candidate from $subscriberId',
+      );
+      return;
+    }
 
     try {
       final roomPtr = toCString(roomId);
