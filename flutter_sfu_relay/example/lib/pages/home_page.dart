@@ -246,8 +246,8 @@ class _HomePageState extends State<HomePage> {
       // 1. 创建并连接 LiveKit 房间
       _room = lk.Room(
         roomOptions: const lk.RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
+          adaptiveStream: false, // 禁用自适应流，防止 Relay 节点画质自动降低
+          dynacast: true, // 保持 dynacast 开启，以便发布端支持多流
           defaultAudioOutputOptions: lk.AudioOutputOptions(speakerOn: true),
           defaultAudioCaptureOptions: lk.AudioCaptureOptions(
             noiseSuppression: true,
@@ -565,11 +565,14 @@ class _HomePageState extends State<HomePage> {
     // Relay 节点：需要订阅 SFU 来获取源视频
     if (isRelay) {
       if (!pub.subscribed) {
+        debugPrint('[Relay] Subscribing to SFU track for forwarding');
         pub.subscribe();
       }
-      // Relay 使用最高画质
+      // Relay 强制使用最高画质（避免模糊）
+      // 即使是单流，请求 HIGH 也能防止 SDK 误判
       pub.setVideoQuality(lk.VideoQuality.HIGH);
-      pub.setVideoFPS(60);
+      // setVideoFPS 在单流模式下可能无效，但为了保险起见保留
+      // pub.setVideoFPS(60);
       return;
     }
 
