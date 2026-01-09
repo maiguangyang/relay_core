@@ -82,6 +82,9 @@ type SourceSwitcher struct {
 	packetsFromSFU   uint64
 	packetsFromLocal uint64
 
+	// 下游错误日志节流
+	lastWriteErrorTime int64 // UnixNano, atomic
+
 	// 回调
 	onSourceChanged func(roomID string, sourceType SourceType, sharerID string)
 	onTrackChanged  func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP)
@@ -400,7 +403,14 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 	}
 
 	if err := track.WriteRTP(packet); err != nil {
-		utils.Error("[Switcher] WriteRTP error: %v (isVideo: %v)", err, isVideo)
+		// 节流错误日志：每秒只打印一次
+		now := time.Now().UnixNano()
+		last := atomic.LoadInt64(&ss.lastWriteErrorTime)
+		if now-last > int64(time.Second) {
+			if atomic.CompareAndSwapInt64(&ss.lastWriteErrorTime, last, now) {
+				utils.Error("[Switcher] WriteRTP error: %v (isVideo: %v)", err, isVideo)
+			}
+		}
 		return err
 	}
 

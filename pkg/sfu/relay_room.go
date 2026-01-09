@@ -665,8 +665,18 @@ func (r *RelayRoom) setupICEHandlers(sub *Subscriber) {
 			sub.state = SubscriberStateDisconnected
 		case webrtc.PeerConnectionStateFailed:
 			sub.state = SubscriberStateFailed
+			// 启动异步清理，避免死锁 (RemoveSubscriber 需要获取 r.mu，而当前持有 sub.mu)
+			go func() {
+				utils.Info("[RelayRoom] Subscriber %s connection failed, removing...", sub.id)
+				r.RemoveSubscriber(sub.id)
+			}()
 		case webrtc.PeerConnectionStateClosed:
 			sub.state = SubscriberStateDisconnected
+			// 启动异步清理
+			go func() {
+				utils.Info("[RelayRoom] Subscriber %s connection closed, removing...", sub.id)
+				r.RemoveSubscriber(sub.id)
+			}()
 		}
 		sub.mu.Unlock()
 	})
