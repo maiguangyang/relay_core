@@ -549,6 +549,10 @@ extern int RelayRoomInjectSFU(char* roomID, int isVideo, void* data, int dataLen
 //
 extern int RelayRoomInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
 
+// RelayRoomHandleLocalPublisherOffer 处理本地 Loopback P2P 连接 Offer
+//
+extern char* RelayRoomHandleLocalPublisherOffer(char* roomID, char* offerSDP);
+
 // RelayRoomStartLocalShare 开始本地分享
 //
 extern int RelayRoomStartLocalShare(char* roomID, char* sharerID);

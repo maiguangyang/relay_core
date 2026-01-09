@@ -304,6 +304,25 @@ class RelayRoomP2P {
     }
   }
 
+  /// 处理本地 Loopback P2P 连接 Offer
+  ///
+  /// 返回 Answer SDP
+  String? handleLocalPublisherOffer(String offerSdp) {
+    final roomPtr = toCString(roomId);
+    final offerPtr = toCString(offerSdp);
+    try {
+      final resultPtr = bindings.RelayRoomHandleLocalPublisherOffer(
+        roomPtr,
+        offerPtr,
+      );
+      if (resultPtr == nullptr) return null;
+      return fromCString(resultPtr);
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(offerPtr);
+    }
+  }
+
   // ========== 状态查询 ==========
 
   /// 获取房间状态

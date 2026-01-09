@@ -477,6 +477,27 @@ func RelayRoomInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 	return C.int(0)
 }
 
+// RelayRoomHandleLocalPublisherOffer 处理本地 Loopback P2P 连接 Offer
+//
+//export RelayRoomHandleLocalPublisherOffer
+func RelayRoomHandleLocalPublisherOffer(roomID *C.char, offerSDP *C.char) *C.char {
+	goRoomID := C.GoString(roomID)
+	goOfferSDP := C.GoString(offerSDP)
+
+	room := getRelayRoom(goRoomID)
+	if room == nil {
+		return nil
+	}
+
+	answerSDP, err := room.HandleLocalPublisherOffer(goOfferSDP)
+	if err != nil {
+		utils.Error("Failed to handle local publisher offer: %v", err)
+		return nil
+	}
+
+	return C.CString(answerSDP)
+}
+
 // RelayRoomStartLocalShare 开始本地分享
 //
 //export RelayRoomStartLocalShare

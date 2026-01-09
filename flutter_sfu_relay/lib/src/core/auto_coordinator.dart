@@ -15,6 +15,7 @@ import 'dart:convert';
 import '../callbacks/callbacks.dart';
 import '../enums.dart';
 import '../signaling/signaling.dart';
+import '../room/relay_room_p2p.dart';
 import 'coordinator.dart';
 
 /// Bot Token 请求回调类型
@@ -155,9 +156,13 @@ class AutoCoordinator {
   final String localPeerId;
   final SignalingBridge signaling;
   final AutoCoordinatorConfig config;
+  // Coordinator (Go 绑定)
+  final Coordinator _coordinator;
 
-  late final Coordinator _coordinator;
+  // RelayRoom P2P (P2P 管理)
+  late final RelayRoomP2P _relayRoomP2P;
 
+  // P2P 状态
   AutoCoordinatorState _state = AutoCoordinatorState.idle;
   String? _currentRelay;
   int _currentEpoch = 0;
@@ -185,6 +190,9 @@ class AutoCoordinator {
   RTCPeerConnection? _p2pConnection;
   MediaStream? _p2pRemoteStream;
   bool _p2pConnected = false;
+
+  // Relay 本地 Loopback 连接 (作为 Publisher)
+  RTCPeerConnection? _loopbackPeerConnection;
 
   // 屏幕共享状态
   String? _screenSharerPeerId; // 当前屏幕共享者的 ID
@@ -218,8 +226,8 @@ class AutoCoordinator {
     required this.localPeerId,
     required this.signaling,
     this.config = const AutoCoordinatorConfig(),
-  }) {
-    _coordinator = Coordinator(roomId: roomId, localPeerId: localPeerId);
+  }) : _coordinator = Coordinator(roomId: roomId, localPeerId: localPeerId) {
+    _relayRoomP2P = RelayRoomP2P(roomId);
     _calculateLocalScore();
   }
 
@@ -460,6 +468,60 @@ class AutoCoordinator {
   /// 开始本地分享
   bool startLocalShare() {
     return _coordinator.startLocalShare(localPeerId);
+  }
+
+  /// 启动 Relay Loopback 连接 (将本地屏幕共享流注入 Relay)
+  /// [track] 本地屏幕共享轨道
+  Future<void> startRelayLoopback(MediaStreamTrack track) async {
+    // 只有当本机是 Relay 时才需要 Loopback
+    if (!isRelay) return;
+
+    // 如果已有连接，先停止
+    await stopRelayLoopback();
+
+    try {
+      print('[RelayLoopback] Starting loopback connection...');
+
+      // 创建 PeerConnection (无需 ICE Server)
+      _loopbackPeerConnection = await createPeerConnection({});
+
+      // 创建一个本地流用于容纳 Track
+      final stream = await createLocalMediaStream('loopback_stream');
+
+      // 注意：这里我们只添加 track 到 PC，不依赖 stream.addTrack（因为 stream 主要是用于分组）
+      // addTrack 需要 stream 参数
+      await _loopbackPeerConnection!.addTrack(track, stream);
+
+      // 创建 Offer
+      final offer = await _loopbackPeerConnection!.createOffer({
+        'offerToReceiveVideo': false,
+        'offerToReceiveAudio': false,
+      });
+      await _loopbackPeerConnection!.setLocalDescription(offer);
+
+      // 通过 FFI 发送 Offer 给 Go 层 RelayRoom
+      final answerSdp = _relayRoomP2P.handleLocalPublisherOffer(offer.sdp!);
+      if (answerSdp != null) {
+        final answer = RTCSessionDescription(answerSdp, 'answer');
+        await _loopbackPeerConnection!.setRemoteDescription(answer);
+        print('[RelayLoopback] Connection established!');
+      } else {
+        print('[RelayLoopback] Failed to get answer from RelayRoom');
+        await stopRelayLoopback();
+      }
+    } catch (e) {
+      print('[RelayLoopback] Error: $e');
+      await stopRelayLoopback();
+    }
+  }
+
+  /// 停止 Relay Loopback 连接
+  Future<void> stopRelayLoopback() async {
+    if (_loopbackPeerConnection != null) {
+      await _loopbackPeerConnection!.close();
+      _loopbackPeerConnection = null;
+      print('[RelayLoopback] Connection closed');
+    }
   }
 
   /// 停止本地分享

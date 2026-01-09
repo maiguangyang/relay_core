@@ -317,7 +317,26 @@ func (ss *SourceSwitcher) InjectLocalPacket(isVideo bool, data []byte) error {
 	return ss.writePacket(isVideo, data, false)
 }
 
-// writePacket 写入 RTP 包到对应的 Track
+// IngestLocalRTP 注入来自本地分享者的 RTP 包 (直接使用 *rtp.Packet)
+// 当活跃源是 Local 时，数据会被转发给订阅者 (供 Local Loopback P2P 使用)
+func (ss *SourceSwitcher) IngestLocalRTP(isVideo bool, packet *rtp.Packet) error {
+	ss.mu.RLock()
+	if ss.closed {
+		ss.mu.RUnlock()
+		return ErrForwarderClosed
+	}
+	ss.localActive = true
+	ss.mu.RUnlock()
+
+	// 只有当活跃源是 Local 时才转发
+	if ss.GetActiveSource() != SourceTypeLocal {
+		return nil
+	}
+
+	return ss.processRTPPacket(isVideo, packet, false)
+}
+
+// writePacket 写入 RTP 包到对应的 Track (From Bytes)
 func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) error {
 	// 解析 RTP 包
 	packet := &rtp.Packet{}
@@ -325,6 +344,11 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 		return err
 	}
 
+	return ss.processRTPPacket(isVideo, packet, fromSFU)
+}
+
+// processRTPPacket 处理并转发 RTP 包
+func (ss *SourceSwitcher) processRTPPacket(isVideo bool, packet *rtp.Packet, fromSFU bool) error {
 	// 获取当前的 Track 引用（需要加锁，因为 SetVideoCodec 可能正在更新）
 	ss.mu.RLock()
 	var track *webrtc.TrackLocalStaticRTP

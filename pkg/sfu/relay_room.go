@@ -82,6 +82,9 @@ type RelayRoom struct {
 	isRelay     bool   // 本机是否是 Relay
 	relayPeerID string // Relay 节点的 ID
 
+	// 本地 Loopback 连接 (作为 Publisher)
+	localPublisher *webrtc.PeerConnection
+
 	// 回调
 	onSubscriberJoined func(roomID, peerID string)
 	onSubscriberLeft   func(roomID, peerID string)
@@ -880,4 +883,110 @@ func (r *RelayRoom) GetStatus() RelayRoomStatus {
 func (s RelayRoomStatus) ToJSON() string {
 	data, _ := json.Marshal(s)
 	return string(data)
+}
+
+// HandleLocalPublisherOffer 处理本地分享者（Publisher）的 Loopback 连接请求
+// 这是一个特殊的 P2P 连接，用于将本地屏幕共享流直接注入到 RelayRoom -> SourceSwitcher
+func (r *RelayRoom) HandleLocalPublisherOffer(offerSDP string) (string, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return "", ErrRoomClosed
+	}
+
+	// 如果已有连接，先关闭（支持重连）
+	if r.localPublisher != nil {
+		r.localPublisher.Close()
+		r.localPublisher = nil
+	}
+	r.mu.Unlock()
+
+	// 创建 PeerConnection
+	// 注意：Loopback 连接不需要 ICE 服务器，因为直接是本地到本地
+	pc, err := r.api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		return "", err
+	}
+
+	// 允许接收 Video/Audio
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	// 监听 Track (接收 RTP 包并注入 Switcher)
+	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		utils.Info("[RelayRoom] Local publisher track added: %s (%s)", track.ID(), track.Kind())
+
+		// 自动开始本地分享
+		r.switcher.StartLocalShare("localclient")
+
+		// 异步读取并转发 RTP
+		go r.readLocalRTP(track)
+	})
+
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		utils.Info("[RelayRoom] Local publisher connection state: %s", state)
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+			// 连接断开时，停止本地分享
+			r.switcher.StopLocalShare()
+		}
+	})
+
+	// 处理 Offer
+	offer := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP:  offerSDP,
+	}
+
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	// 创建 Answer
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	if err := pc.SetLocalDescription(answer); err != nil {
+		pc.Close()
+		return "", err
+	}
+
+	r.mu.Lock()
+	r.localPublisher = pc
+	r.mu.Unlock()
+
+	return answer.SDP, nil
+}
+
+// readLocalRTP 读取本地 Loopback Track 的 RTP 包并注入 SourceSwitcher
+func (r *RelayRoom) readLocalRTP(track *webrtc.TrackRemote) {
+	isVideo := track.Kind() == webrtc.RTPCodecTypeVideo
+
+	for {
+		// ReadRTP returns *rtp.Packet
+		packet, _, err := track.ReadRTP()
+		if err != nil {
+			utils.Error("[RelayRoom] ReadLocalRTP error: %v", err)
+			return
+		}
+
+		// 直接注入
+		if err := r.switcher.IngestLocalRTP(isVideo, packet); err != nil {
+			// Ignore closed error
+		}
+	}
 }

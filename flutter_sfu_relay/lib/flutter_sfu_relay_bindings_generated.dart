@@ -1821,6 +1821,31 @@ class FlutterSfuRelayBindings {
         int Function(ffi.Pointer<ffi.Char>)
       >();
 
+  /// RelayRoomHandleLocalPublisherOffer 处理本地 Loopback P2P 连接 Offer
+  ffi.Pointer<ffi.Char> RelayRoomHandleLocalPublisherOffer(
+    ffi.Pointer<ffi.Char> roomID,
+    ffi.Pointer<ffi.Char> offerSDP,
+  ) {
+    return _RelayRoomHandleLocalPublisherOffer(roomID, offerSDP);
+  }
+
+  late final _RelayRoomHandleLocalPublisherOfferPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(
+            ffi.Pointer<ffi.Char>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('RelayRoomHandleLocalPublisherOffer');
+  late final _RelayRoomHandleLocalPublisherOffer =
+      _RelayRoomHandleLocalPublisherOfferPtr.asFunction<
+        ffi.Pointer<ffi.Char> Function(
+          ffi.Pointer<ffi.Char>,
+          ffi.Pointer<ffi.Char>,
+        )
+      >();
+
   /// BufferPoolGetStats 获取全局缓冲池统计
   ffi.Pointer<ffi.Char> BufferPoolGetStats() {
     return _BufferPoolGetStats();

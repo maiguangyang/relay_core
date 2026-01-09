@@ -337,7 +337,21 @@ class _HomePageState extends State<HomePage> {
       });
 
       _autoCoord!.onRelayChanged.listen((relayId) {
-        if (mounted) setState(() => _currentRelay = relayId);
+        if (mounted) {
+          setState(() => _currentRelay = relayId);
+
+          // 检查 Relay 状态变化，决定是否启动 Loopback
+          final isRelay = relayId == _localParticipant?.identity;
+          final isSharing = _controlState.screenShareEnabled;
+
+          if (isRelay && isSharing) {
+            // 变成了 Relay 且正在分享 -> 启动 Loopback
+            _startRelayLoopback();
+          } else if (!isRelay) {
+            // 不再是 Relay -> 停止 Loopback
+            _autoCoord?.stopRelayLoopback();
+          }
+        }
       });
 
       // 5. 监听 Peer 加入/离开 (比 LiveKit 事件更快)
@@ -999,6 +1013,11 @@ class _HomePageState extends State<HomePage> {
               result.isScreen) {
             await ScreenCaptureChannel.showScreenShareUI();
           }
+
+          // 如果当前是 Relay，启动 Loopback 连接
+          if (_autoCoord?.isRelay == true) {
+            _startRelayLoopback();
+          }
         } else if (!kIsWeb && Platform.isIOS) {
           // iOS: 使用 Broadcast Extension 进行屏幕共享
           // 检查是否是模拟器，模拟器不支持 ReplayKit 屏幕共享
@@ -1066,6 +1085,9 @@ class _HomePageState extends State<HomePage> {
         if (Platform.isMacOS || Platform.isWindows) {
           await ScreenCaptureChannel.hideScreenShareUI();
         }
+
+        // 停止 Loopback
+        await _autoCoord?.stopRelayLoopback();
       }
 
       // 通知 AutoCoordinator 屏幕共享状态变化
@@ -1110,6 +1132,28 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
   // UI 构建
   // ============================================================
+
+  /// 查找本地屏幕共享 Track 并启动 Loopback
+  void _startRelayLoopback() {
+    if (_localParticipant == null || _autoCoord == null) return;
+
+    lk.LocalVideoTrack? screenTrack;
+    for (final pub in _localParticipant!.videoTrackPublications) {
+      if (pub.source == lk.TrackSource.screenShareVideo && pub.track != null) {
+        screenTrack = pub.track as lk.LocalVideoTrack;
+        break;
+      }
+    }
+
+    if (screenTrack != null) {
+      debugPrint('[HomePage] Starting Relay Loopback for screen share');
+      _autoCoord!.startRelayLoopback(screenTrack.mediaStreamTrack);
+    } else {
+      debugPrint(
+        '[HomePage] Cannot start Relay Loopback: screen track not found',
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

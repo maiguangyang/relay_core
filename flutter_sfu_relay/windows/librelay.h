@@ -549,6 +549,10 @@ extern __declspec(dllexport) int RelayRoomInjectSFU(char* roomID, int isVideo, v
 //
 extern __declspec(dllexport) int RelayRoomInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
 
+// RelayRoomHandleLocalPublisherOffer 处理本地 Loopback P2P 连接 Offer
+//
+extern __declspec(dllexport) char* RelayRoomHandleLocalPublisherOffer(char* roomID, char* offerSDP);
+
 // RelayRoomStartLocalShare 开始本地分享
 //
 extern __declspec(dllexport) int RelayRoomStartLocalShare(char* roomID, char* sharerID);
