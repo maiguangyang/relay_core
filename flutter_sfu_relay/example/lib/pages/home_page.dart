@@ -246,7 +246,7 @@ class _HomePageState extends State<HomePage> {
       // 1. 创建并连接 LiveKit 房间
       _room = lk.Room(
         roomOptions: const lk.RoomOptions(
-          adaptiveStream: true,
+          adaptiveStream: false, // 禁用自适应流，防止 Relay 转发时被降级
           dynacast: true,
           defaultAudioOutputOptions: lk.AudioOutputOptions(speakerOn: true),
           defaultAudioCaptureOptions: lk.AudioCaptureOptions(
@@ -555,7 +555,7 @@ class _HomePageState extends State<HomePage> {
       }
       // Relay 使用最高画质
       pub.setVideoQuality(lk.VideoQuality.HIGH);
-      pub.setVideoFPS(60);
+      // pub.setVideoFPS(60); // 移除强制 60fps，跟随源端帧率即可
       return;
     }
 
@@ -918,29 +918,29 @@ class _HomePageState extends State<HomePage> {
           if (result == null) return;
 
           // 根据网络类型动态调整码率和帧率
-          // Ethernet: 5 Mbps / 60fps (最佳画质)
-          // WiFi: 2.5 Mbps / 30fps (平衡，防止拥塞)
-          // Others: 1.5 Mbps / 15fps (低带宽兼容)
+          // Ethernet: 3.0 Mbps / 30fps (高质量办公模式)
+          // WiFi: 1.5 Mbps / 15fps (标准办公模式，接近腾讯会议)
+          // Others: 1.0 Mbps / 15fps (省流模式)
           int maxBitrate;
           int maxFramerate;
 
           if (_lastConnectionType == ConnectionType.ethernet) {
-            maxBitrate = 5 * 1000 * 1000;
-            maxFramerate = 60;
-            debugPrint(
-              '[ScreenShare] Network: Ethernet -> Using High Quality (5Mbps/60fps)',
-            );
-          } else if (_lastConnectionType == ConnectionType.wifi) {
-            maxBitrate = 2500000; // 2.5 Mbps
+            maxBitrate = 3000 * 1000; // 3.0 Mbps
             maxFramerate = 30;
             debugPrint(
-              '[ScreenShare] Network: WiFi -> Using Balanced Quality (2.5Mbps/30fps)',
+              '[ScreenShare] Network: Ethernet -> Using High Quality Office Mode (3Mbps/30fps)',
             );
-          } else {
-            maxBitrate = 1500000; // 1.5 Mbps
+          } else if (_lastConnectionType == ConnectionType.wifi) {
+            maxBitrate = 1500 * 1000; // 1.5 Mbps
             maxFramerate = 15;
             debugPrint(
-              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Low Bandwidth (1.5Mbps/15fps)',
+              '[ScreenShare] Network: WiFi -> Using Standard Office Mode (1.5Mbps/15fps)',
+            );
+          } else {
+            maxBitrate = 1000 * 1000; // 1.0 Mbps
+            maxFramerate = 15;
+            debugPrint(
+              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Data Saver Mode (1Mbps/15fps)',
             );
           }
 
@@ -949,6 +949,7 @@ class _HomePageState extends State<HomePage> {
             lk.ScreenShareCaptureOptions(
               sourceId: result.source.id,
               maxFrameRate: maxFramerate.toDouble(),
+              captureScreenAudio: true, // 启用屏幕音频采集 (Content Hint 最佳实践)
               params: lk.VideoParameters(
                 dimensions: const lk.VideoDimensions(1920, 1080),
                 encoding: lk.VideoEncoding(
