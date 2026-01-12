@@ -22,8 +22,8 @@ func TestMock_RelayRoomConnection(t *testing.T) {
 	}
 	defer relay.Close()
 
-	relay.BecomeRelay("relay-node")
-	relay.GetSourceSwitcher().StartLocalShare("local-sharer")
+	relay.BecomeRelay("relay-node") // 模拟开始本地分享
+	relay.GetSourceSwitcher().StartLocalShare("test-sharer", "")
 
 	// 2. 创建模拟客户端 PeerConnection
 	m := &webrtc.MediaEngine{}

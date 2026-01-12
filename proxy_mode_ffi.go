@@ -147,8 +147,26 @@ func SourceSwitcherStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 		return C.int(-1)
 	}
 
-	ss.StartLocalShare(goSharerID)
-	utils.Info("Local share started: room=%s, sharer=%s", goRoomID, goSharerID)
+	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
+	// 为了兼容性，如果不是 JSON 或解析失败，则当作普通 ID 处理
+	var id, codec string
+	if len(goSharerID) > 0 && goSharerID[0] == '{' {
+		var payload struct {
+			ID    string `json:"id"`
+			Codec string `json:"codec"`
+		}
+		if err := json.Unmarshal([]byte(goSharerID), &payload); err == nil {
+			id = payload.ID
+			codec = payload.Codec
+		}
+	}
+
+	if id == "" {
+		id = goSharerID
+	}
+
+	ss.StartLocalShare(id, codec)
+	utils.Info("Local share started: room=%s, sharer=%s, codec=%s", goRoomID, id, codec)
 	return C.int(0)
 }
 
@@ -767,7 +785,25 @@ func CoordinatorStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 	}
 
 	pmc := v.(*sfu.ProxyModeCoordinator)
-	pmc.StartLocalShare(goSharerID)
+
+	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
+	var id, codec string
+	if len(goSharerID) > 0 && goSharerID[0] == '{' {
+		var payload struct {
+			ID    string `json:"id"`
+			Codec string `json:"codec"`
+		}
+		if err := json.Unmarshal([]byte(goSharerID), &payload); err == nil {
+			id = payload.ID
+			codec = payload.Codec
+		}
+	}
+
+	if id == "" {
+		id = goSharerID
+	}
+
+	pmc.StartLocalShare(id, codec)
 
 	return C.int(0)
 }

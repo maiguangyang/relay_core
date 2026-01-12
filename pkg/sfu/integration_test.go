@@ -159,8 +159,8 @@ func TestIntegration_DataFlowScenario(t *testing.T) {
 		switcher.InjectSFUPacket(true, packet)
 	}
 
-	// 切换到本地分享
-	switcher.StartLocalShare("sharer-1")
+	// 模拟开始本地分享
+	switcher.StartLocalShare("sharer-1", "")
 
 	// 注入本地数据
 	for i := 0; i < 50; i++ {

@@ -124,7 +124,7 @@ func main() {
 	// 8. 模拟本地分享
 	fmt.Println("\n7. Simulating Local Share...")
 	fmt.Println("   Starting local share from 'mobile-user'...")
-	switcher.StartLocalShare("mobile-user")
+	switcher.StartLocalShare("mobile-user", "") // Fixed signature: added empty string for sourceID
 
 	time.Sleep(100 * time.Millisecond)
 

@@ -890,6 +890,8 @@ class _HomePageState extends State<HomePage> {
 
     final newState = !_controlState.screenShareEnabled;
 
+    String? selectedCodec;
+
     try {
       if (newState) {
         // 检查是否已有人在分享屏幕
@@ -919,7 +921,7 @@ class _HomePageState extends State<HomePage> {
 
           // 根据网络类型动态调整码率和帧率
           // Ethernet: 3.0 Mbps / 30fps (高质量办公模式)
-          // WiFi: 1.5 Mbps / 15fps (标准办公模式，接近腾讯会议)
+          // WiFi: 3.0 Mbps / 15fps (标准办公模式，接近腾讯会议)
           // Others: 1.0 Mbps / 15fps (省流模式)
           int maxBitrate;
           int maxFramerate;
@@ -927,20 +929,26 @@ class _HomePageState extends State<HomePage> {
           if (_lastConnectionType == ConnectionType.ethernet) {
             maxBitrate = 3000 * 1000; // 3.0 Mbps
             maxFramerate = 30;
+            // Ethernet 使用 VP9 以获得最佳画质，硬件支持通常较好
+            selectedCodec = 'vp9';
             debugPrint(
-              '[ScreenShare] Network: Ethernet -> Using High Quality Office Mode (3Mbps/30fps)',
+              '[ScreenShare] Network: Ethernet -> Using High Quality Office Mode (3Mbps/30fps/VP9)',
             );
           } else if (_lastConnectionType == ConnectionType.wifi) {
-            maxBitrate = 2000 * 1000; // 2.0 Mbps
+            maxBitrate = 3000 * 1000; // 3.0 Mbps (提升码率以解决深色背景色彩断层)
             maxFramerate = 15;
+            // WiFi 使用 VP9 以获得更高压缩率和更好画质（解决色带问题）
+            selectedCodec = 'vp9';
             debugPrint(
-              '[ScreenShare] Network: WiFi -> Using Standard Office Mode (2.0Mbps/15fps)',
+              '[ScreenShare] Network: WiFi -> Using High Fidelity Office Mode (3.0Mbps/15fps/VP9)',
             );
           } else {
             maxBitrate = 1000 * 1000; // 1.0 Mbps
             maxFramerate = 15;
+            // 蜂窝网络使用 H.264 以获得更好的兼容性和更低的编解码开销（省电）
+            selectedCodec = 'h264';
             debugPrint(
-              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Data Saver Mode (1Mbps/15fps)',
+              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Data Saver Mode (1Mbps/15fps/H264)',
             );
           }
 
@@ -966,13 +974,15 @@ class _HomePageState extends State<HomePage> {
           debugPrint('[ScreenShare]   - Source: ${result.source.id}');
           debugPrint('[ScreenShare]   - Is Screen: ${result.isScreen}');
           debugPrint(
-            '[ScreenShare]   - Requested: 1920x1080 @ ${maxFramerate}fps, ${(maxBitrate / 1000000).toStringAsFixed(1)}Mbps',
+            '[ScreenShare]   - Requested: 1920x1080 @ ${maxFramerate}fps, ${(maxBitrate / 1000000).toStringAsFixed(1)}Mbps, Codec: $selectedCodec',
           );
 
           // 禁用 simulcast 并设置参数
           await _localParticipant!.publishVideoTrack(
             track,
             publishOptions: lk.VideoPublishOptions(
+              // 动态选择编码器
+              videoCodec: selectedCodec!,
               videoEncoding: lk.VideoEncoding(
                 maxBitrate: maxBitrate,
                 maxFramerate: maxFramerate,
@@ -990,6 +1000,7 @@ class _HomePageState extends State<HomePage> {
               debugPrint('[ScreenShare] Published Track Info:');
               debugPrint('[ScreenShare]   - SID: ${pub.sid}');
               debugPrint('[ScreenShare]   - Name: ${pub.name}');
+              debugPrint('[ScreenShare]   - Codec: $selectedCodec');
               debugPrint('[ScreenShare]   - Muted: ${pub.muted}');
               debugPrint('[ScreenShare]   - Subscribed: ${pub.subscribed}');
             }
@@ -1071,7 +1082,7 @@ class _HomePageState extends State<HomePage> {
 
       // 通知 AutoCoordinator 屏幕共享状态变化
       if (newState) {
-        _autoCoord?.notifyScreenShareStarted();
+        _autoCoord?.notifyScreenShareStarted(codec: selectedCodec);
       } else {
         _autoCoord?.notifyScreenShareStopped();
       }

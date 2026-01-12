@@ -393,8 +393,8 @@ func (pmc *ProxyModeCoordinator) InjectLocalPacket(isVideo bool, data []byte) er
 }
 
 // StartLocalShare 开始本地分享
-func (pmc *ProxyModeCoordinator) StartLocalShare(sharerID string) {
-	pmc.switcher.StartLocalShare(sharerID)
+func (pmc *ProxyModeCoordinator) StartLocalShare(sharerID string, codecType string) {
+	pmc.switcher.StartLocalShare(sharerID, codecType)
 }
 
 // StopLocalShare 停止本地分享

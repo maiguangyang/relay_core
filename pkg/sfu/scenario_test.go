@@ -240,7 +240,7 @@ func TestScenario_SourceSwitchLatency(t *testing.T) {
 	for i := 0; i < testRounds; i++ {
 		// 切换到 Local
 		startSwitch := time.Now()
-		switcher.StartLocalShare(fmt.Sprintf("sharer-%d", i))
+		switcher.StartLocalShare(fmt.Sprintf("sharer-%d", i), "")
 		switchLatency := time.Since(startSwitch)
 
 		atomic.AddInt64(&totalSwitchTime, switchLatency.Nanoseconds())
