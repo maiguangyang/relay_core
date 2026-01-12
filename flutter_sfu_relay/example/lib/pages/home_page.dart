@@ -931,10 +931,10 @@ class _HomePageState extends State<HomePage> {
               '[ScreenShare] Network: Ethernet -> Using High Quality Office Mode (3Mbps/30fps)',
             );
           } else if (_lastConnectionType == ConnectionType.wifi) {
-            maxBitrate = 1500 * 1000; // 1.5 Mbps
+            maxBitrate = 2000 * 1000; // 2.0 Mbps
             maxFramerate = 15;
             debugPrint(
-              '[ScreenShare] Network: WiFi -> Using Standard Office Mode (1.5Mbps/15fps)',
+              '[ScreenShare] Network: WiFi -> Using Standard Office Mode (2.0Mbps/15fps)',
             );
           } else {
             maxBitrate = 1000 * 1000; // 1.0 Mbps
