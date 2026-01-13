@@ -728,10 +728,25 @@ func CoordinatorInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 	}
 
 	pmc := v.(*sfu.ProxyModeCoordinator)
-	goData := C.GoBytes(data, dataLen)
-	if err := pmc.InjectSFUPacket(isVideo != 0, goData); err != nil {
+
+	// 优化：使用 sync.Pool 复用内存
+	length := int(dataLen)
+	buf := packetPool.Get().([]byte)
+	if cap(buf) < length {
+		buf = make([]byte, length)
+	} else {
+		buf = buf[:length]
+	}
+
+	srcSlice := unsafe.Slice((*byte)(data), length)
+	copy(buf, srcSlice)
+
+	if err := pmc.InjectSFUPacket(isVideo != 0, buf); err != nil {
+		packetPool.Put(buf)
 		return C.int(-1)
 	}
+
+	packetPool.Put(buf)
 	return C.int(0)
 }
 
@@ -747,10 +762,25 @@ func CoordinatorInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, 
 	}
 
 	pmc := v.(*sfu.ProxyModeCoordinator)
-	goData := C.GoBytes(data, dataLen)
-	if err := pmc.InjectLocalPacket(isVideo != 0, goData); err != nil {
+
+	// 优化：使用 sync.Pool 复用内存
+	length := int(dataLen)
+	buf := packetPool.Get().([]byte)
+	if cap(buf) < length {
+		buf = make([]byte, length)
+	} else {
+		buf = buf[:length]
+	}
+
+	srcSlice := unsafe.Slice((*byte)(data), length)
+	copy(buf, srcSlice)
+
+	if err := pmc.InjectLocalPacket(isVideo != 0, buf); err != nil {
+		packetPool.Put(buf)
 		return C.int(-1)
 	}
+
+	packetPool.Put(buf)
 	return C.int(0)
 }
 

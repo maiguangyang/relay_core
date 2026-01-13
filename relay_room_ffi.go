@@ -413,6 +413,14 @@ func RelayRoomGetStatus(roomID *C.char) *C.char {
 // SourceSwitcher 集成（便捷方法）
 // ==========================================
 
+// packetPool 用于复用 RTP 包内存，减少 GC 压力
+var packetPool = sync.Pool{
+	New: func() interface{} {
+		// 预分配 1500 字节 (MTU)
+		return make([]byte, 1500)
+	},
+}
+
 // RelayRoomInjectSFU 注入 SFU RTP 包（通过 RelayRoom）
 //
 //export RelayRoomInjectSFU
@@ -429,11 +437,32 @@ func RelayRoomInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, data
 		return C.int(-1)
 	}
 
-	goData := C.GoBytes(data, dataLen)
-	if err := switcher.InjectSFUPacket(isVideo != 0, goData); err != nil {
+	// 优化：使用 sync.Pool 复用内存
+	// C.GoBytes 会分配新内存，导致大量 GC
+	length := int(dataLen)
+
+	// 从池中获取 buffer
+	buf := packetPool.Get().([]byte)
+	// 确保 buffer 够大
+	if cap(buf) < length {
+		buf = make([]byte, length)
+	} else {
+		buf = buf[:length]
+	}
+
+	// 零拷贝转换 C 指针为 Go Slice Header (Go 1.17+ unsafe.Slice)
+	// 注意：srcSlice 只是 C 内存的引用，不能直接传给 channel，必须拷贝
+	srcSlice := unsafe.Slice((*byte)(data), length)
+	copy(buf, srcSlice)
+
+	// 注入数据 (WritePacket 是同步的，不会持有 buffer 引用，所以可以安全回收)
+	if err := switcher.InjectSFUPacket(isVideo != 0, buf); err != nil {
+		packetPool.Put(buf) // 即使出错也回收
 		return C.int(-1)
 	}
 
+	// 回收 buffer
+	packetPool.Put(buf)
 	return C.int(0)
 }
 
@@ -453,11 +482,24 @@ func RelayRoomInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 		return C.int(-1)
 	}
 
-	goData := C.GoBytes(data, dataLen)
-	if err := switcher.InjectLocalPacket(isVideo != 0, goData); err != nil {
+	// 优化：使用 sync.Pool 复用内存
+	length := int(dataLen)
+	buf := packetPool.Get().([]byte)
+	if cap(buf) < length {
+		buf = make([]byte, length)
+	} else {
+		buf = buf[:length]
+	}
+
+	srcSlice := unsafe.Slice((*byte)(data), length)
+	copy(buf, srcSlice)
+
+	if err := switcher.InjectLocalPacket(isVideo != 0, buf); err != nil {
+		packetPool.Put(buf)
 		return C.int(-1)
 	}
 
+	packetPool.Put(buf)
 	return C.int(0)
 }
 
