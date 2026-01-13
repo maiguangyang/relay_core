@@ -96,6 +96,13 @@ class _HomePageState extends State<HomePage> {
   bool _hasP2PVideo = false;
   bool _p2pFirstFrameRendered = false; // 视频首帧是否已渲染
 
+  // AutoCoordinator 订阅（必须取消以避免内存泄漏）
+  StreamSubscription<AutoCoordinatorState>? _stateSubscription;
+  StreamSubscription<String>? _relayChangedSubscription;
+  StreamSubscription<String>? _peerJoinedSubscription;
+  StreamSubscription<String>? _peerLeftSubscription;
+  StreamSubscription<String?>? _screenShareSubscription;
+
   // LocalShareBridge - 零 FFI 本地分享桥接器
   // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
   LocalShareBridge? _localShareBridge;
@@ -340,16 +347,16 @@ class _HomePageState extends State<HomePage> {
       );
 
       // 4. 监听 Relay 状态
-      _autoCoord!.onStateChanged.listen((state) {
+      _stateSubscription = _autoCoord!.onStateChanged.listen((state) {
         if (mounted) setState(() => _relayState = state);
       });
 
-      _autoCoord!.onRelayChanged.listen((relayId) {
+      _relayChangedSubscription = _autoCoord!.onRelayChanged.listen((relayId) {
         if (mounted) setState(() => _currentRelay = relayId);
       });
 
       // 5. 监听 Peer 加入/离开 (比 LiveKit 事件更快)
-      _autoCoord!.onPeerJoined.listen((peerId) {
+      _peerJoinedSubscription = _autoCoord!.onPeerJoined.listen((peerId) {
         if (mounted) {
           final isLocalSharing = _autoCoord?.isLocalScreenSharing ?? false;
           final screenSharerPeerId = _autoCoord?.screenSharerPeerId;
@@ -370,7 +377,7 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
-      _autoCoord!.onPeerLeft.listen((peerId) {
+      _peerLeftSubscription = _autoCoord!.onPeerLeft.listen((peerId) {
         if (mounted) {
           debugPrint('[Signaling] Peer left: $peerId');
           _updateParticipants();
@@ -378,7 +385,9 @@ class _HomePageState extends State<HomePage> {
       });
 
       // 监听屏幕共享状态变化
-      _autoCoord!.onScreenShareChanged.listen((sharerPeerId) {
+      _screenShareSubscription = _autoCoord!.onScreenShareChanged.listen((
+        sharerPeerId,
+      ) {
         if (mounted) {
           debugPrint(
             '[ScreenShare] Screen share changed: sharer = $sharerPeerId, isLocalSharing = ${_autoCoord?.isLocalScreenSharing}',
@@ -775,7 +784,19 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
-    // 1. 先停止 AutoCoordinator（包含信令清理）
+    // 1. 取消 AutoCoordinator 的所有订阅（避免内存泄漏）
+    _stateSubscription?.cancel();
+    _stateSubscription = null;
+    _relayChangedSubscription?.cancel();
+    _relayChangedSubscription = null;
+    _peerJoinedSubscription?.cancel();
+    _peerJoinedSubscription = null;
+    _peerLeftSubscription?.cancel();
+    _peerLeftSubscription = null;
+    _screenShareSubscription?.cancel();
+    _screenShareSubscription = null;
+
+    // 2. 先停止 AutoCoordinator（包含信令清理）
     if (_autoCoord != null) {
       try {
         // 给 AutoCoordinator 停止一个超时时间

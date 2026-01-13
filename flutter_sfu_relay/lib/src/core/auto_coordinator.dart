@@ -503,6 +503,10 @@ class AutoCoordinator {
         _screenShareChangedController.add(null);
       }
     }
+
+    // 通知 Go 层停止本地分享模式（释放资源）
+    stopLocalShare();
+
     // 广播给其他用户
     signaling.sendScreenShare(roomId, false);
   }
