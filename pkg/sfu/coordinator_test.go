@@ -139,8 +139,8 @@ func TestCoordinatorLocalShare(t *testing.T) {
 		t.Fatalf("Failed to create coordinator: %v", err)
 	}
 	defer pmc.Close()
-
-	pmc.StartLocalShare("sharer-1")
+	// 开始本地分享
+	pmc.StartLocalShare("local-peer", "")
 
 	switcher := pmc.GetSourceSwitcher()
 	if !switcher.IsLocalSharing() {

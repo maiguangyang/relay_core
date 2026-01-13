@@ -429,10 +429,37 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 }
 
 // StartLocalShare 开始本地分享（切换到 Local 源）
-func (ss *SourceSwitcher) StartLocalShare(sharerID string) {
+func (ss *SourceSwitcher) StartLocalShare(sharerID string, codecType string) {
 	ss.mu.Lock()
 	ss.localSharerID = sharerID
 	ss.mu.Unlock()
+
+	// 尝试应用 Codec (如果有指定)
+	if codecType != "" {
+		var mimeType string
+		switch codecType {
+		case "vp8":
+			mimeType = webrtc.MimeTypeVP8
+		case "vp9":
+			mimeType = webrtc.MimeTypeVP9
+		case "h264":
+			mimeType = webrtc.MimeTypeH264
+		case "av1":
+			mimeType = webrtc.MimeTypeAV1
+		default:
+			// 尝试模糊匹配或直接使用
+			// 例如传入 video/VP9
+			mimeType = codecType
+		}
+
+		// 对于 H264/VP9，通常不需要具体的 sdpFmtpLine 进行简单的 Relay
+		// 但如果需要支持 Profile level id，可能需要更复杂的解析
+		// 目前简单映射 MimeType 即可，WebRTC 协商会自动处理 payload type
+		utils.Info("[Switcher] StartLocalShare requesting codec: %s", mimeType)
+		if err := ss.SetVideoCodec(webrtc.RTPCodecCapability{MimeType: mimeType}); err != nil {
+			utils.Error("[Switcher] Failed to set video codec: %v", err)
+		}
+	}
 
 	// 原子切换源
 	ss.activeSource.Store(int32(SourceTypeLocal))

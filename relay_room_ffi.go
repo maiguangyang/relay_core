@@ -520,12 +520,29 @@ func RelayRoomStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 		return C.int(-1)
 	}
 
-	switcher.StartLocalShare(goSharerID)
+	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
+	var id, codec string
+	if len(goSharerID) > 0 && goSharerID[0] == '{' {
+		var payload struct {
+			ID    string `json:"id"`
+			Codec string `json:"codec"`
+		}
+		if err := json.Unmarshal([]byte(goSharerID), &payload); err == nil {
+			id = payload.ID
+			codec = payload.Codec
+		}
+	}
+
+	if id == "" {
+		id = goSharerID
+	}
+
+	switcher.StartLocalShare(id, codec)
 
 	// 触发重协商（通知订阅者源已切换）
 	room.TriggerRenegotiation()
 
-	utils.Info("Local share started in room %s by %s", goRoomID, goSharerID)
+	utils.Info("Local share started in room %s by %s, codec=%s", goRoomID, id, codec)
 	return C.int(0)
 }
 
