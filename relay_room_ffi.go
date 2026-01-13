@@ -537,7 +537,8 @@ func RelayRoomStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 		id = goSharerID
 	}
 
-	switcher.StartLocalShare(id, codec)
+	// Relay 自己在分享，保持 SFU 路径
+	switcher.StartLocalShare(id, codec, true)
 
 	// 触发重协商（通知订阅者源已切换）
 	room.TriggerRenegotiation()

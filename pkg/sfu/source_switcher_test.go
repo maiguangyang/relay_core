@@ -70,7 +70,7 @@ func TestSourceSwitcherLocalShare(t *testing.T) {
 	defer switcher.Close()
 
 	// 开始本地分享
-	switcher.StartLocalShare("sharer-1", "")
+	switcher.StartLocalShare("sharer-1", "", false)
 
 	if !switcher.IsLocalSharing() {
 		t.Error("Should be local sharing after StartLocalShare")
@@ -110,7 +110,7 @@ func TestSourceSwitcherCallback(t *testing.T) {
 	})
 
 	// 切换到本地分享
-	switcher.StartLocalShare("sharer", "")
+	switcher.StartLocalShare("sharer", "", false)
 
 	select {
 	case src := <-callbackCalled:
@@ -211,7 +211,7 @@ func BenchmarkSourceSwitcherSwitch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if i%2 == 0 {
-			switcher.StartLocalShare("sharer", "")
+			switcher.StartLocalShare("sharer", "", false)
 		} else {
 			switcher.StopLocalShare()
 		}

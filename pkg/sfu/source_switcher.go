@@ -429,7 +429,10 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 }
 
 // StartLocalShare 开始本地分享（切换到 Local 源）
-func (ss *SourceSwitcher) StartLocalShare(sharerID string, codecType string) {
+// isRelaySelf: 如果 true，表示 Relay 自己在分享屏幕（SFU 路径继续使用）
+//
+//	如果 false，表示远端设备在分享（LocalShareBridge UDP 路径）
+func (ss *SourceSwitcher) StartLocalShare(sharerID string, codecType string, isRelaySelf bool) {
 	ss.mu.Lock()
 	ss.localSharerID = sharerID
 	ss.mu.Unlock()
@@ -461,8 +464,25 @@ func (ss *SourceSwitcher) StartLocalShare(sharerID string, codecType string) {
 		}
 	}
 
-	// 原子切换源
-	ss.activeSource.Store(int32(SourceTypeLocal))
+	// 关键逻辑：
+	// 如果 Relay 自己在分享屏幕，数据流是：
+	//   本地屏幕 -> LiveKit -> SFU -> Shadow Connection -> InjectSFUPacket()
+	// 所以应该保持 SFU 源活跃，不切换到 Local
+	//
+	// 如果远端设备在分享，数据流是：
+	//   远端设备 -> LocalShareBridge UDP -> InjectLocalPacket()
+	// 这时需要切换到 Local 源
+	if isRelaySelf {
+		utils.Info("[Switcher] Relay is screen sharer, keeping SFU source active (path: LiveKit->SFU->Bridge->InjectSFU)")
+		// 不切换 activeSource，保持 SFU 路径
+		ss.mu.Lock()
+		ss.localActive = true // 标记本地分享活跃（用于状态显示）
+		ss.mu.Unlock()
+	} else {
+		utils.Info("[Switcher] Remote device is screen sharer, switching to Local source (path: LocalShareBridge UDP)")
+		// 原子切换源到 Local
+		ss.activeSource.Store(int32(SourceTypeLocal))
+	}
 
 	// 触发回调
 	ss.mu.RLock()

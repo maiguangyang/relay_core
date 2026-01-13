@@ -393,8 +393,9 @@ func (pmc *ProxyModeCoordinator) InjectLocalPacket(isVideo bool, data []byte) er
 }
 
 // StartLocalShare 开始本地分享
-func (pmc *ProxyModeCoordinator) StartLocalShare(sharerID string, codecType string) {
-	pmc.switcher.StartLocalShare(sharerID, codecType)
+// isRelaySelf: 如果 Relay 自己在分享，设为 true（保持 SFU 路径）
+func (pmc *ProxyModeCoordinator) StartLocalShare(sharerID string, codecType string, isRelaySelf bool) {
+	pmc.switcher.StartLocalShare(sharerID, codecType, isRelaySelf)
 }
 
 // StopLocalShare 停止本地分享

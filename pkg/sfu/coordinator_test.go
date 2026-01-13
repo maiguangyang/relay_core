@@ -140,7 +140,7 @@ func TestCoordinatorLocalShare(t *testing.T) {
 	}
 	defer pmc.Close()
 	// 开始本地分享
-	pmc.StartLocalShare("local-peer", "")
+	pmc.StartLocalShare("local-peer", "", false)
 
 	switcher := pmc.GetSourceSwitcher()
 	if !switcher.IsLocalSharing() {

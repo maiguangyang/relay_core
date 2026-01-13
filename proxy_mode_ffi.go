@@ -165,7 +165,8 @@ func SourceSwitcherStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 		id = goSharerID
 	}
 
-	ss.StartLocalShare(id, codec)
+	// 默认 isRelaySelf=true（Relay 自己分享的情况）
+	ss.StartLocalShare(id, codec, true)
 	utils.Info("Local share started: room=%s, sharer=%s, codec=%s", goRoomID, id, codec)
 	return C.int(0)
 }
@@ -833,7 +834,8 @@ func CoordinatorStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 		id = goSharerID
 	}
 
-	pmc.StartLocalShare(id, codec)
+	// Coordinator 自己在分享，保持 SFU 路径
+	pmc.StartLocalShare(id, codec, true)
 
 	return C.int(0)
 }
