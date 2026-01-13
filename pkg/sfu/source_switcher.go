@@ -10,6 +10,7 @@
 package sfu
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +91,27 @@ type SourceSwitcher struct {
 	onTrackChanged  func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP)
 
 	closed bool
+}
+
+// Close 关闭源切换器，释放资源
+func (ss *SourceSwitcher) Close() error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if ss.closed {
+		return nil
+	}
+	ss.closed = true
+
+	// 释放 Track 引用，帮助 GC
+	ss.videoTrack = nil
+	ss.audioTrack = nil
+
+	// 清除回调，避免后续触发
+	ss.onSourceChanged = nil
+	ss.onTrackChanged = nil
+
+	return nil
 }
 
 // NewSourceSwitcher 创建新的源切换器
@@ -511,6 +533,13 @@ func (ss *SourceSwitcher) StopLocalShare() {
 	if fn != nil {
 		fn(ss.roomID, SourceTypeSFU, sharerID)
 	}
+
+	// 强制执行一次 GC，释放可能积压的视频缓冲区
+	utils.Info("[Switcher] Local share stopped, forcing GC to release memory")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		runtime.GC()
+	}()
 }
 
 // SwitchToSource 手动切换到指定源
@@ -540,13 +569,6 @@ func (ss *SourceSwitcher) IsLocalSharing() bool {
 // Stats 返回统计信息
 func (ss *SourceSwitcher) Stats() (sfuPackets, localPackets uint64) {
 	return atomic.LoadUint64(&ss.packetsFromSFU), atomic.LoadUint64(&ss.packetsFromLocal)
-}
-
-// Close 关闭源切换器
-func (ss *SourceSwitcher) Close() {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	ss.closed = true
 }
 
 // SourceSwitcherStatus 源切换器状态

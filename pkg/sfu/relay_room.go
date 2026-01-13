@@ -637,7 +637,7 @@ func (r *RelayRoom) Close() error {
 		sub.mu.Unlock()
 	}
 
-	// 关闭源切换器
+	// 关闭 SourceSwitcher
 	if r.switcher != nil {
 		r.switcher.Close()
 	}
