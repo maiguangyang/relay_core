@@ -160,8 +160,13 @@ func (b *LocalShareBridge) Stop() {
 
 	b.setState(LocalShareBridgeStateStopping)
 
-	// 发送停止信号
-	close(b.stopCh)
+	// 发送停止信号（安全关闭，避免重复关闭 panic）
+	select {
+	case <-b.stopCh:
+		// 已经关闭
+	default:
+		close(b.stopCh)
+	}
 
 	// 设置读超时，让 readLoop 退出
 	b.conn.SetReadDeadline(time.Now())
@@ -169,6 +174,12 @@ func (b *LocalShareBridge) Stop() {
 	// 关闭连接
 	b.conn.Close()
 	b.conn = nil
+
+	// 重新创建 stopCh，支持重启
+	b.stopCh = make(chan struct{})
+
+	// 重置 closed 标志，允许重用
+	// (closed 只在 Close() 中设为 true，表示永久关闭)
 
 	b.setState(LocalShareBridgeStateStopped)
 	utils.Info("[LocalShareBridge] Stopped for room %s", b.roomID)
@@ -318,13 +329,16 @@ func GetLocalShareBridge(roomID string) *LocalShareBridge {
 }
 
 // CreateLocalShareBridge 创建桥接器
+// 如果已存在旧的桥接器，先关闭再创建新的
 func CreateLocalShareBridge(roomID string, switcher *SourceSwitcher) *LocalShareBridge {
 	localShareBridgesMu.Lock()
 	defer localShareBridgesMu.Unlock()
 
-	// 已存在则返回
-	if bridge, ok := localShareBridges[roomID]; ok {
-		return bridge
+	// 如果已存在，先关闭旧的（避免内存泄漏）
+	if oldBridge, ok := localShareBridges[roomID]; ok {
+		oldBridge.Close()
+		delete(localShareBridges, roomID)
+		utils.Info("[LocalShareBridge] Cleaned up old bridge for room %s", roomID)
 	}
 
 	bridge := NewLocalShareBridge(roomID, switcher)

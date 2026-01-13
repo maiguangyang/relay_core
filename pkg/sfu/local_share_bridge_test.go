@@ -127,10 +127,14 @@ func TestLocalShareBridge_GlobalManagement(t *testing.T) {
 		t.Error("GetLocalShareBridge should return the same instance")
 	}
 
-	// 创建相同房间应返回现有实例
+	// 创建相同房间应创建新实例（为避免内存泄漏，老的会被清理）
 	bridge3 := CreateLocalShareBridge("global-test-room", switcher)
-	if bridge3 != bridge {
-		t.Error("CreateLocalShareBridge should return existing instance")
+	if bridge3 == nil {
+		t.Error("CreateLocalShareBridge should return new instance")
+	}
+	// 新行为：每次创建都是新的实例，旧的被清理
+	if bridge3 == bridge {
+		t.Error("CreateLocalShareBridge should create new instance, not reuse old one")
 	}
 
 	// 销毁

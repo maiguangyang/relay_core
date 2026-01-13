@@ -622,6 +622,10 @@ func CoordinatorDisable(roomID *C.char) C.int {
 		coordinators.Delete(goRoomID)
 	}
 
+	// 清理关联的资源（避免内存泄漏）
+	sfu.DestroyBridge(goRoomID)           // 清理 LiveKitBridge
+	sfu.DestroyLocalShareBridge(goRoomID) // 清理 LocalShareBridge
+
 	utils.Info("Coordinator disabled: room=%s", goRoomID)
 	return C.int(0)
 }
