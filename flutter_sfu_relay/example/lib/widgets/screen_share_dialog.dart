@@ -1,9 +1,5 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 import 'package:flutter_sfu_relay/screen_share_helper.dart';
 import '../theme/app_theme.dart';
@@ -55,23 +51,29 @@ class _ThumbnailWidget extends StatefulWidget {
 
 class _ThumbnailWidgetState extends State<_ThumbnailWidget> {
   final List<StreamSubscription> _subscriptions = [];
-  Uint8List? _thumbnail;
   String _name = '';
+  ImageProvider? _imageProvider;
 
   @override
   void initState() {
     super.initState();
     _name = widget.source.name;
-    _thumbnail = widget.source.thumbnail?.isNotEmpty == true
-        ? widget.source.thumbnail
-        : null;
+    if (widget.source.thumbnail?.isNotEmpty == true) {
+      _imageProvider = MemoryImage(widget.source.thumbnail!);
+    }
 
     // 监听缩略图变化
     _subscriptions.add(
       widget.source.onThumbnailChanged.stream.listen((thumbnail) {
         if (mounted) {
+          // 移除旧图片缓存，防止内存泄露
+          _imageProvider?.evict();
           setState(() {
-            _thumbnail = thumbnail;
+            if (thumbnail.isNotEmpty) {
+              _imageProvider = MemoryImage(thumbnail);
+            } else {
+              _imageProvider = null;
+            }
           });
         }
       }),
@@ -91,6 +93,8 @@ class _ThumbnailWidgetState extends State<_ThumbnailWidget> {
 
   @override
   void dispose() {
+    // 销毁时清理当前图片缓存
+    _imageProvider?.evict();
     for (var sub in _subscriptions) {
       sub.cancel();
     }
@@ -131,9 +135,9 @@ class _ThumbnailWidgetState extends State<_ThumbnailWidget> {
                 child: Container(
                   width: double.infinity,
                   color: Colors.black,
-                  child: _thumbnail != null
-                      ? Image.memory(
-                          _thumbnail!,
+                  child: _imageProvider != null
+                      ? Image(
+                          image: _imageProvider!,
                           fit: BoxFit.contain,
                           gaplessPlayback: true,
                         )
@@ -311,6 +315,9 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
     for (var sub in _subscriptions) {
       sub.cancel();
     }
+    _sources.clear();
+    // 强制清理图片缓存，防止缩略图占用内存
+    PaintingBinding.instance.imageCache.clear();
     super.dispose();
   }
 

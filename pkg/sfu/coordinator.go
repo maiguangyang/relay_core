@@ -506,4 +506,14 @@ func (pmc *ProxyModeCoordinator) Close() {
 	if pmc.switcher != nil {
 		pmc.switcher.Close()
 	}
+
+	// 清理引用，帮助 GC 释放内存
+	pmc.mu.Lock()
+	pmc.keepalive = nil
+	pmc.elector = nil
+	pmc.failover = nil
+	pmc.relayRoom = nil
+	pmc.switcher = nil
+	pmc.onEvent = nil
+	pmc.mu.Unlock()
 }

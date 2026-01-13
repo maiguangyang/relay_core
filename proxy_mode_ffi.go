@@ -17,6 +17,8 @@ import "C"
 
 import (
 	"encoding/json"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"unsafe"
 
@@ -857,6 +859,24 @@ func CoordinatorStopLocalShare(roomID *C.char) C.int {
 
 	pmc := v.(*sfu.ProxyModeCoordinator)
 	pmc.StopLocalShare()
+
+	// 强制执行 GC 并将内存归还给操作系统
+	// 解决用户报告的内存泄漏问题（Go 惰性 GC 导致 RSS 虚高）
+	debug.FreeOSMemory()
+
+	// 打印详细的内存统计信息，帮助定位泄漏源头
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	utils.Info("[MemStats] After FreeOSMemory: Alloc=%v MiB, TotalAlloc=%v MiB, Sys=%v MiB, NumGC=%v, HeapObjects=%v, HeapInUse=%v MiB, HeapIdle=%v MiB",
+		m.Alloc/1024/1024,
+		m.TotalAlloc/1024/1024,
+		m.Sys/1024/1024,
+		m.NumGC,
+		m.Mallocs-m.Frees,
+		m.HeapInuse/1024/1024,
+		m.HeapIdle/1024/1024,
+	)
+	utils.Info("CoordinatorStopLocalShare: invoked FreeOSMemory")
 
 	return C.int(0)
 }

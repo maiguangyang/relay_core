@@ -633,6 +633,7 @@ func (r *RelayRoom) Close() error {
 		sub.closed = true
 		if sub.pc != nil {
 			sub.pc.Close()
+			sub.pc = nil // 帮助 GC
 		}
 		sub.mu.Unlock()
 	}
@@ -641,6 +642,17 @@ func (r *RelayRoom) Close() error {
 	if r.switcher != nil {
 		r.switcher.Close()
 	}
+
+	// 清理引用，帮助 GC 释放内存
+	r.mu.Lock()
+	r.switcher = nil
+	r.onSubscriberJoined = nil
+	r.onSubscriberLeft = nil
+	r.onICECandidate = nil
+	r.onNeedRenegotiate = nil
+	r.onError = nil
+	r.onKeyframeRequest = nil
+	r.mu.Unlock()
 
 	return nil
 }

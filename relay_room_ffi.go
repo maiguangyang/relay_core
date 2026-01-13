@@ -57,6 +57,8 @@ func unregisterRelayRoom(roomID string) {
 		v.(*sfu.RelayRoom).Close()
 		relayRooms.Delete(roomID)
 	}
+	// 关键修复：同时注销 SourceSwitcher，防止内存泄漏
+	unregisterSourceSwitcher(roomID)
 }
 
 // ==========================================

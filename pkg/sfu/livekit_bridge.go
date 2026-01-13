@@ -328,6 +328,17 @@ func (b *LiveKitBridge) Close() {
 	if room != nil {
 		room.Disconnect()
 	}
+
+	// 清理引用，帮助 GC 释放内存
+	b.mu.Lock()
+	b.switcher = nil
+	b.onStateChanged = nil
+	b.onError = nil
+	// 重置统计计数器
+	atomic.StoreUint64(&b.videoPacketsReceived, 0)
+	atomic.StoreUint64(&b.audioPacketsReceived, 0)
+	atomic.StoreInt32(&b.tracksSubscribed, 0)
+	b.mu.Unlock()
 }
 
 // RequestKeyframe 请求关键帧

@@ -1488,8 +1488,12 @@ class AutoCoordinator {
 
     if (_p2pConnection != null) {
       await _p2pConnection!.close();
+      // 关键修复：close() 只是关闭信令，dispose() 才会释放 Native 资源
+      await _p2pConnection!.dispose();
       _p2pConnection = null;
     }
+    // 关键修复：MediaStream 也需要 dispose() 释放音视频轨道
+    await _p2pRemoteStream?.dispose();
     _p2pRemoteStream = null;
     _p2pConnected = false;
     // 检查是否已销毁，避免向已关闭的 controller 添加事件

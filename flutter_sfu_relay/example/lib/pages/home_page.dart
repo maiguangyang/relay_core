@@ -42,15 +42,16 @@ class _HomePageState extends State<HomePage> {
   // 连接配置
   final _urlController = TextEditingController(
     // text: 'wss://frp.marlon.proton-system.com',
-    text: 'wss://oxygen-sl1zv95n.livekit.cloud',
-    // text: 'ws://192.167.167.129:19885',
+    // text: 'wss://oxygen-sl1zv95n.livekit.cloud',
+    text: 'ws://192.167.167.129:7880',
   );
   final _tokenController = TextEditingController();
   // 影子连接专用：Bot Token (identity: "relay-bot", hidden: true, canSubscribe: true)
   final _botTokenController = TextEditingController(
     // 测试用写死的 Bot Token
     text:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
+        // 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTkxMTc5MzcsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NzU4MTkzNywic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.pj328J32dm8ota1xlirBaTs8B_BIIpiopN68BGMjYxk',
   );
 
   // 页面状态
@@ -106,6 +107,9 @@ class _HomePageState extends State<HomePage> {
   // LocalShareBridge - 零 FFI 本地分享桥接器
   // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
   LocalShareBridge? _localShareBridge;
+
+  // 本地屏幕共享 Track (桌面平台手动创建，需要手动释放)
+  lk.LocalVideoTrack? _localScreenShareTrack;
 
   @override
   void initState() {
@@ -773,6 +777,16 @@ class _HomePageState extends State<HomePage> {
         if (Platform.isMacOS || Platform.isWindows) {
           await ScreenCaptureChannel.hideScreenShareUI();
         }
+        // 释放屏幕共享 Track - 必须用 dispose() 释放所有资源
+        if (_localScreenShareTrack != null) {
+          try {
+            await _localScreenShareTrack!.dispose();
+            debugPrint('[ScreenShare] Track disposed on disconnect');
+          } catch (e) {
+            debugPrint('[ScreenShare] Error disposing track on disconnect: $e');
+          }
+          _localScreenShareTrack = null;
+        }
         // 清理 LocalShareBridge
         if (_localShareBridge != null) {
           await _localShareBridge!.destroy();
@@ -823,7 +837,38 @@ class _HomePageState extends State<HomePage> {
       _roomListener = null;
     }
 
-    // 3. 断开并销毁 Room
+    // 3. 激进清理 flutter_webrtc 资源：先取消订阅所有远端轨道
+    if (_room != null) {
+      try {
+        // 取消订阅所有远端轨道（确保 RTCVideoRenderer 释放纹理）
+        // 本地轨道会在 Room.disconnect() 时自动 unpublish，无需手动操作
+        for (final participant in _room!.remoteParticipants.values) {
+          for (final pub in participant.trackPublications.values) {
+            // participant.trackPublications 的值已经是 RemoteTrackPublication 类型
+            if (pub.subscribed) {
+              try {
+                pub.unsubscribe();
+                debugPrint('[Cleanup] Unsubscribed remote track: ${pub.sid}');
+              } catch (e) {
+                debugPrint(
+                  '[Cleanup] Error unsubscribing track ${pub.sid}: $e',
+                );
+              }
+            }
+          }
+        }
+
+        // 3.3 给 flutter_webrtc 时间释放纹理
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // 3.4 清理图片缓存
+        PaintingBinding.instance.imageCache.clear();
+      } catch (e) {
+        debugPrint('[Cleanup] Error during track cleanup: $e');
+      }
+    }
+
+    // 4. 断开并销毁 Room
     if (_room != null) {
       try {
         await _room!.disconnect().timeout(const Duration(seconds: 2));
@@ -846,9 +891,35 @@ class _HomePageState extends State<HomePage> {
     _p2pVideoRenderer?.srcObject = null;
     _p2pVideoRenderer?.dispose();
     _p2pVideoRenderer = null;
+    // 关键修复：MediaStream 需要 dispose() 释放 Native 资源
+    await _p2pRemoteStream?.dispose();
     _p2pRemoteStream = null;
     _hasP2PVideo = false;
     _p2pFirstFrameRendered = false;
+
+    // 5. 关键修复：清理屏幕共享资源（防止 Native Source 和 Go Bridge 泄漏）
+    if (_localScreenShareTrack != null) {
+      try {
+        debugPrint('[Cleanup] Stopping local screen share track...');
+        await _localScreenShareTrack!.stop(); // 停止采集
+        await _localScreenShareTrack!.dispose(); // 销毁 Source
+        debugPrint('[Cleanup] Local Screen Share Track disposed');
+      } catch (e) {
+        debugPrint('[Cleanup] Error disposing screen share track: $e');
+      }
+      _localScreenShareTrack = null;
+    }
+
+    if (_localShareBridge != null) {
+      try {
+        debugPrint('[Cleanup] Destroying Local Share Bridge...');
+        await _localShareBridge!.destroy();
+        debugPrint('[Cleanup] Local Share Bridge destroyed');
+      } catch (e) {
+        debugPrint('[Cleanup] Error destroying share bridge: $e');
+      }
+      _localShareBridge = null;
+    }
 
     // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
     await Future.delayed(const Duration(milliseconds: 2000));
@@ -988,48 +1059,53 @@ class _HomePageState extends State<HomePage> {
           }
 
           // 使用动态参数创建 Track
-          final track = await lk.LocalVideoTrack.createScreenShareTrack(
-            lk.ScreenShareCaptureOptions(
-              sourceId: result.source.id,
-              maxFrameRate: maxFramerate.toDouble(),
-              captureScreenAudio: true, // 启用屏幕音频采集 (Content Hint 最佳实践)
-              params: lk.VideoParameters(
-                dimensions: const lk.VideoDimensions(1920, 1080),
-                encoding: lk.VideoEncoding(
+          lk.LocalVideoTrack? track;
+          try {
+            track = await lk.LocalVideoTrack.createScreenShareTrack(
+              lk.ScreenShareCaptureOptions(
+                sourceId: result.source.id,
+                maxFrameRate: maxFramerate.toDouble(),
+                captureScreenAudio: true, // 启用屏幕音频采集 (Content Hint 最佳实践)
+                params: lk.VideoParameters(
+                  dimensions: const lk.VideoDimensions(1920, 1080),
+                  encoding: lk.VideoEncoding(
+                    maxBitrate: maxBitrate,
+                    maxFramerate: maxFramerate,
+                  ),
+                ),
+              ),
+            );
+
+            // 诊断日志：打印屏幕共享 Track 的实际参数
+            debugPrint('[ScreenShare] Track created:');
+            debugPrint('[ScreenShare]   - Track SID: ${track.sid}');
+
+            await _localParticipant!.publishVideoTrack(
+              track,
+              publishOptions: lk.VideoPublishOptions(
+                // 动态选择编码器
+                videoCodec: selectedCodec,
+                videoEncoding: lk.VideoEncoding(
                   maxBitrate: maxBitrate,
                   maxFramerate: maxFramerate,
                 ),
+                simulcast: false, // 禁用 simulcast，避免低质量层级
+                // 关键修复：强制使用 L1T1 (无 SVC)，防止 Relay 转发时出现 VP9 图层引用错误导致的残影
+                scalabilityMode: 'L1T1',
               ),
-            ),
-          );
+            );
 
-          // 诊断日志：打印屏幕共享 Track 的实际参数
-          debugPrint('[ScreenShare] Track created:');
-          debugPrint('[ScreenShare]   - Track SID: ${track.sid}');
-          debugPrint('[ScreenShare]   - Source: ${result.source.id}');
-          debugPrint('[ScreenShare]   - Is Screen: ${result.isScreen}');
-          debugPrint(
-            '[ScreenShare]   - Requested: 1920x1080 @ ${maxFramerate}fps, ${(maxBitrate / 1000000).toStringAsFixed(1)}Mbps, Codec: $selectedCodec',
-          );
+            // 保存 Track 引用，停止屏幕共享时需要手动释放
+            _localScreenShareTrack = track;
 
-          // 禁用 simulcast 并设置参数
-          await _localParticipant!.publishVideoTrack(
-            track,
-            publishOptions: lk.VideoPublishOptions(
-              // 动态选择编码器
-              videoCodec: selectedCodec!,
-              videoEncoding: lk.VideoEncoding(
-                maxBitrate: maxBitrate,
-                maxFramerate: maxFramerate,
-              ),
-              simulcast: false, // 禁用 simulcast，避免低质量层级
-              // 关键修复：强制使用 L1T1 (无 SVC)，防止 Relay 转发时出现 VP9 图层引用错误导致的残影
-              scalabilityMode: 'L1T1',
-            ),
-          );
-
-          // 发布后再次检查
-          debugPrint('[ScreenShare] Track published successfully');
+            // 发布后再次检查
+            debugPrint('[ScreenShare] Track published successfully');
+          } catch (e) {
+            debugPrint('[ScreenShare] Failed to publish track: $e');
+            // 发生异常时，立即释放已创建的 Track，防止泄露
+            await track?.dispose();
+            return;
+          }
 
           // 获取发布后的实际参数
           for (final pub in _localParticipant!.videoTrackPublications) {
@@ -1109,11 +1185,49 @@ class _HomePageState extends State<HomePage> {
           await _localParticipant!.setScreenShareEnabled(true);
         }
       } else {
-        await _localParticipant!.setScreenShareEnabled(false);
+        if (!kIsWeb &&
+            (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+          // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
+          // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
+          if (_localScreenShareTrack != null) {
+            // 1. 暂存 Track 引用，因为我们要先从 UI 中移除它
+            final trackToDispose = _localScreenShareTrack!;
 
-        // macOS/Windows: 隐藏屏幕共享 UI 并恢复窗口
-        if (Platform.isMacOS || Platform.isWindows) {
+            // 2. 先更新 UI，移除 VideoRenderer 组件 (关键步骤)
+            setState(() {
+              _localScreenShareTrack = null;
+            });
+
+            // 3. 给 Flutter 一帧的时间去销毁 VideoRenderer Widget
+            // 防止 Widget 持有 Texture 时我们销毁了 Track 导致 Native 资源锁死
+            await Future.delayed(const Duration(milliseconds: 100));
+
+            try {
+              // 4. 从房间移除发布 - 使用 SDK 标准方法
+              await _localParticipant!.setScreenShareEnabled(false);
+
+              // 5. 停止采集 (SDK 可能已经调用了 stop，但再次调用是安全的)
+              await trackToDispose.stop();
+
+              // 6. 销毁资源
+              await trackToDispose.dispose();
+
+              // 7. 激进清理缓存
+              PaintingBinding.instance.imageCache.clear();
+
+              debugPrint(
+                '[ScreenShare] Track stopped and disposed (UI unmounted first)',
+              );
+            } catch (e) {
+              debugPrint('[ScreenShare] Error cleaning up track: $e');
+            }
+          }
+
+          // 隐藏 UI
           await ScreenCaptureChannel.hideScreenShareUI();
+        } else {
+          // Mobile/Web: 使用 SDK 提供的便捷方法
+          await _localParticipant!.setScreenShareEnabled(false);
         }
       }
 
@@ -1221,25 +1335,31 @@ class _HomePageState extends State<HomePage> {
     // 获取屏幕共享视频轨道
     lk.VideoTrack? screenTrack;
     final isRelay = _autoCoord?.isRelay ?? false;
-    for (final pub in screenSharer.videoTrackPublications) {
-      if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
-        // 关键修复：Relay 需要先订阅 track，即使当前未订阅
-        // 之前的逻辑：只有 pub.subscribed 为 true 才调用 _configureVideoQuality
-        // 这造成了鸡生蛋问题：Relay 之前是 LAN 订阅者（已取消订阅），
-        // 变成 Relay 后 pub.subscribed 仍然是 false，无法获取 track
-        if (pub is lk.RemoteTrackPublication) {
-          // Relay 需要主动订阅来获取视频源
-          if (isRelay && !pub.subscribed) {
-            debugPrint('[Relay] Subscribing to remote screen share track');
+
+    // 关键修复 (Root Cause Fix):
+    // 对于本地分享者，强制使用 _localScreenShareTrack 作为唯一真理来源 (Source of Truth)。
+    // 即使 SDK 内部列表 (videoTrackPublications) 还没更新，只要 _localScreenShareTrack 被置为 null，
+    // UI 就必须立即停止渲染。这确保了 stop() 流程中的 "Unmount UI -> Wait -> Dispose" 顺序生效。
+    if (isSharerLocal) {
+      screenTrack = _localScreenShareTrack;
+    } else {
+      // 远程分享者逻辑保持不变
+      for (final pub in screenSharer.videoTrackPublications) {
+        if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
+          if (pub is lk.RemoteTrackPublication) {
+            // Relay 需要主动订阅来获取视频源
+            if (isRelay && !pub.subscribed) {
+              debugPrint('[Relay] Subscribing to remote screen share track');
+            }
+            _configureVideoQuality(pub);
           }
-          _configureVideoQuality(pub);
-        }
-        // 检查是否可以获取 track
-        if (pub.subscribed || _hasP2PVideo || isSharerLocal) {
-          if (pub.track != null) {
-            screenTrack = pub.track as lk.VideoTrack;
+          // 检查是否可以获取 track
+          if (pub.subscribed || _hasP2PVideo) {
+            if (pub.track != null) {
+              screenTrack = pub.track as lk.VideoTrack;
+            }
+            break;
           }
-          break;
         }
       }
     }
@@ -1814,8 +1934,6 @@ class _HomePageState extends State<HomePage> {
 
     // 如果有人在分享屏幕且已最大化，使用特殊布局
     // 但如果是本地参与者正在共享屏幕，则不显示自己的共享画面（继续显示普通会议室视图）
-    final isLocalSharing =
-        _screenShareParticipant?.identity == _localParticipant?.identity;
 
     if (_screenShareParticipant != null && _isScreenShareMaximized) {
       return _buildFeaturedLayout();

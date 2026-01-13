@@ -10,7 +10,7 @@
 package sfu
 
 import (
-	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -558,11 +558,13 @@ func (ss *SourceSwitcher) StopLocalShare() {
 		fn(ss.roomID, SourceTypeSFU, sharerID)
 	}
 
-	// 强制执行一次 GC，释放可能积压的视频缓冲区
-	utils.Info("[Switcher] Local share stopped, forcing GC to release memory")
+	// 强制执行 GC 并将内存归还给操作系统
+	// 解决用户报告的内存泄漏问题（Go 惰性 GC 导致 RSS 虚高）
+	utils.Info("[Switcher] Local share stopped, invoking FreeOSMemory")
 	go func() {
+		// 稍微延迟一下，确保之前的引用都断开
 		time.Sleep(100 * time.Millisecond)
-		runtime.GC()
+		debug.FreeOSMemory()
 	}()
 }
 
