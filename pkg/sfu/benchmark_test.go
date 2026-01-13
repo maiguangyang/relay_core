@@ -366,24 +366,43 @@ func benchmarkThroughput(b *testing.B, targetBitsPerSec int) {
 	defer switcher.Close()
 
 	packetSize := 1200
-	packetsPerSec := targetBitsPerSec / 8 / packetSize
-	interval := time.Second / time.Duration(packetsPerSec)
-
 	packet := make([]byte, packetSize)
+
+	// 注入有效的 RTP 头
+	packet[0] = 0x80 // V=2
+	packet[1] = 0x60 // PT=96 (video)
+
+	b.ResetTimer()
+	b.SetBytes(int64(packetSize))
+
+	for i := 0; i < b.N; i++ {
+		switcher.InjectSFUPacket(true, packet)
+	}
+}
+
+// BenchmarkThroughput_Burst 测试突发吞吐量（无人工限速）
+func BenchmarkThroughput_Burst(b *testing.B) {
+	switcher, _ := NewSourceSwitcher("burst-room")
+	defer switcher.Close()
+
+	packetSize := 1200
+	packet := make([]byte, packetSize)
+	packet[0] = 0x80
+	packet[1] = 0x60
 
 	b.ResetTimer()
 
 	start := time.Now()
-	sent := 0
-	for i := 0; i < b.N && time.Since(start) < time.Second; i++ {
+	for i := 0; i < b.N; i++ {
 		switcher.InjectSFUPacket(true, packet)
-		sent++
-		time.Sleep(interval)
 	}
-
 	elapsed := time.Since(start)
-	actualBps := float64(sent*packetSize*8) / elapsed.Seconds()
-	b.ReportMetric(actualBps/1024/1024, "Mbps")
+
+	// 计算实际吞吐量
+	totalBits := float64(b.N * packetSize * 8)
+	mbps := totalBits / elapsed.Seconds() / 1024 / 1024
+	b.ReportMetric(mbps, "Mbps")
+	b.ReportMetric(float64(b.N)/elapsed.Seconds()/1000, "Kpps") // 千包/秒
 }
 
 // ==========================================

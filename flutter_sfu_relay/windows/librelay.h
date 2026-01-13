@@ -66,6 +66,12 @@ static void callPingCallback(const char* peerID) {
 
 #line 1 "cgo-generated-wrapper"
 
+#line 12 "local_share_bridge_ffi.go"
+
+#include <stdlib.h>
+
+#line 1 "cgo-generated-wrapper"
+
 #line 15 "main.go"
 
 #include <stdlib.h>
@@ -324,6 +330,42 @@ extern __declspec(dllexport) char* LiveKitBridgeGetStatus(char* roomID);
 // 返回: 1 已连接, 0 未连接
 //
 extern __declspec(dllexport) int LiveKitBridgeIsConnected(char* roomID);
+
+// LocalShareBridgeCreate 创建本地分享桥接器
+// 返回: 0 成功, -1 失败
+//
+extern __declspec(dllexport) int LocalShareBridgeCreate(char* roomID);
+
+// LocalShareBridgeStart 启动桥接器并开始监听 UDP
+// preferredPort: 首选端口，0 表示自动分配
+// 返回: 实际监听端口 (成功), -1 (失败)
+//
+extern __declspec(dllexport) int LocalShareBridgeStart(char* roomID, int preferredPort);
+
+// LocalShareBridgeStop 停止桥接器
+// 返回: 0 成功, -1 失败
+//
+extern __declspec(dllexport) int LocalShareBridgeStop(char* roomID);
+
+// LocalShareBridgeDestroy 销毁桥接器
+// 返回: 0 成功
+//
+extern __declspec(dllexport) int LocalShareBridgeDestroy(char* roomID);
+
+// LocalShareBridgeGetPort 获取监听端口
+// 返回: 端口号 (成功), -1 (未启动)
+//
+extern __declspec(dllexport) int LocalShareBridgeGetPort(char* roomID);
+
+// LocalShareBridgeIsRunning 检查是否正在运行
+// 返回: 1 运行中, 0 未运行
+//
+extern __declspec(dllexport) int LocalShareBridgeIsRunning(char* roomID);
+
+// LocalShareBridgeGetStatus 获取桥接器状态
+// 返回: JSON 字符串，需要调用 FreeString 释放
+//
+extern __declspec(dllexport) char* LocalShareBridgeGetStatus(char* roomID);
 extern __declspec(dllexport) int ElectionEnable(int64_t relayID, char* roomID);
 extern __declspec(dllexport) int ElectionDisable(int64_t relayID, char* roomID);
 extern __declspec(dllexport) int ElectionUpdateCandidate(int64_t relayID, char* roomID, char* peerID, int64_t bandwidth, int64_t latency, double packetLoss);

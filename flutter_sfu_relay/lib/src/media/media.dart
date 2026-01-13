@@ -3,3 +3,4 @@ library;
 
 export 'source_switcher.dart';
 export 'jitter_buffer.dart';
+export 'local_share_bridge.dart';

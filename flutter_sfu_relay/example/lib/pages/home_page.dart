@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/services.dart';
 import 'dart:io';
+
+import 'package:flutter/services.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -16,6 +17,9 @@ import 'package:window_manager/window_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/control_bar.dart';
 import '../widgets/screen_share_dialog.dart';
+
+// LocalShareBridge 现在通过公开导出提供
+// import 'package:flutter_sfu_relay/flutter_sfu_relay.dart' 已包含
 
 /// 首页 - 独立完整的会议页面
 /// 包含连接表单、LiveKit集成、屏幕共享、语音会议功能
@@ -91,6 +95,10 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<MediaStream?>? _p2pStreamSubscription;
   bool _hasP2PVideo = false;
   bool _p2pFirstFrameRendered = false; // 视频首帧是否已渲染
+
+  // LocalShareBridge - 零 FFI 本地分享桥接器
+  // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
+  LocalShareBridge? _localShareBridge;
 
   @override
   void initState() {
@@ -756,6 +764,12 @@ class _HomePageState extends State<HomePage> {
         if (Platform.isMacOS || Platform.isWindows) {
           await ScreenCaptureChannel.hideScreenShareUI();
         }
+        // 清理 LocalShareBridge
+        if (_localShareBridge != null) {
+          await _localShareBridge!.destroy();
+          debugPrint('[LocalShareBridge] Destroyed on disconnect');
+          _localShareBridge = null;
+        }
       } catch (e) {
         debugPrint('Error stopping local screen share: $e');
       }
@@ -1084,8 +1098,34 @@ class _HomePageState extends State<HomePage> {
 
       // 通知 AutoCoordinator 屏幕共享状态变化
       if (newState) {
+        // 🚀 使用 LocalShareBridge 优化：零 FFI 本地分享
+        // 创建并启动 UDP 桥接器，RTP 包通过 UDP 发送到 Go 层
+        try {
+          final roomId = _room?.name ?? 'room';
+          _localShareBridge = LocalShareBridge(roomId: roomId);
+          final port = await _localShareBridge!.start();
+          debugPrint(
+            '[LocalShareBridge] Started on port $port for room: $roomId',
+          );
+          debugPrint(
+            '[LocalShareBridge] RTP packets will be sent via UDP (zero FFI!)',
+          );
+        } catch (e) {
+          debugPrint(
+            '[LocalShareBridge] Failed to start: $e, falling back to FFI path',
+          );
+          _localShareBridge = null;
+        }
+
         _autoCoord?.notifyScreenShareStarted(codec: selectedCodec);
       } else {
+        // 停止 LocalShareBridge
+        if (_localShareBridge != null) {
+          await _localShareBridge!.destroy();
+          debugPrint('[LocalShareBridge] Stopped and destroyed');
+          _localShareBridge = null;
+        }
+
         _autoCoord?.notifyScreenShareStopped();
       }
 

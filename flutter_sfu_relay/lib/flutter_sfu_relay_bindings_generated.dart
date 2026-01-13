@@ -506,8 +506,9 @@ class FlutterSfuRelayBindings {
   late final _LiveKitBridgeCreate =
       _LiveKitBridgeCreatePtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
-  /// LiveKitBridgeConnect 连接到 LiveKit 房间
-  /// 返回: 0 成功, -1 失败
+  /// LiveKitBridgeConnect 连接到 LiveKit 房间 (异步)
+  /// 立即返回，连接在后台进行
+  /// 返回: 0 成功启动, -1 失败
   int LiveKitBridgeConnect(
     ffi.Pointer<ffi.Char> roomID,
     ffi.Pointer<ffi.Char> url,
@@ -595,6 +596,116 @@ class FlutterSfuRelayBindings {
   late final _LiveKitBridgeIsConnected =
       _LiveKitBridgeIsConnectedPtr.asFunction<
         int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeCreate 创建本地分享桥接器
+  /// 返回: 0 成功, -1 失败
+  int LocalShareBridgeCreate(ffi.Pointer<ffi.Char> roomID) {
+    return _LocalShareBridgeCreate(roomID);
+  }
+
+  late final _LocalShareBridgeCreatePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LocalShareBridgeCreate',
+      );
+  late final _LocalShareBridgeCreate =
+      _LocalShareBridgeCreatePtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeStart 启动桥接器并开始监听 UDP
+  /// preferredPort: 首选端口，0 表示自动分配
+  /// 返回: 实际监听端口 (成功), -1 (失败)
+  int LocalShareBridgeStart(ffi.Pointer<ffi.Char> roomID, int preferredPort) {
+    return _LocalShareBridgeStart(roomID, preferredPort);
+  }
+
+  late final _LocalShareBridgeStartPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Int)>
+      >('LocalShareBridgeStart');
+  late final _LocalShareBridgeStart =
+      _LocalShareBridgeStartPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>, int)
+      >();
+
+  /// LocalShareBridgeStop 停止桥接器
+  /// 返回: 0 成功, -1 失败
+  int LocalShareBridgeStop(ffi.Pointer<ffi.Char> roomID) {
+    return _LocalShareBridgeStop(roomID);
+  }
+
+  late final _LocalShareBridgeStopPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LocalShareBridgeStop',
+      );
+  late final _LocalShareBridgeStop =
+      _LocalShareBridgeStopPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeDestroy 销毁桥接器
+  /// 返回: 0 成功
+  int LocalShareBridgeDestroy(ffi.Pointer<ffi.Char> roomID) {
+    return _LocalShareBridgeDestroy(roomID);
+  }
+
+  late final _LocalShareBridgeDestroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LocalShareBridgeDestroy',
+      );
+  late final _LocalShareBridgeDestroy =
+      _LocalShareBridgeDestroyPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeGetPort 获取监听端口
+  /// 返回: 端口号 (成功), -1 (未启动)
+  int LocalShareBridgeGetPort(ffi.Pointer<ffi.Char> roomID) {
+    return _LocalShareBridgeGetPort(roomID);
+  }
+
+  late final _LocalShareBridgeGetPortPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LocalShareBridgeGetPort',
+      );
+  late final _LocalShareBridgeGetPort =
+      _LocalShareBridgeGetPortPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeIsRunning 检查是否正在运行
+  /// 返回: 1 运行中, 0 未运行
+  int LocalShareBridgeIsRunning(ffi.Pointer<ffi.Char> roomID) {
+    return _LocalShareBridgeIsRunning(roomID);
+  }
+
+  late final _LocalShareBridgeIsRunningPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+        'LocalShareBridgeIsRunning',
+      );
+  late final _LocalShareBridgeIsRunning =
+      _LocalShareBridgeIsRunningPtr.asFunction<
+        int Function(ffi.Pointer<ffi.Char>)
+      >();
+
+  /// LocalShareBridgeGetStatus 获取桥接器状态
+  /// 返回: JSON 字符串，需要调用 FreeString 释放
+  ffi.Pointer<ffi.Char> LocalShareBridgeGetStatus(
+    ffi.Pointer<ffi.Char> roomID,
+  ) {
+    return _LocalShareBridgeGetStatus(roomID);
+  }
+
+  late final _LocalShareBridgeGetStatusPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)
+        >
+      >('LocalShareBridgeGetStatus');
+  late final _LocalShareBridgeGetStatus =
+      _LocalShareBridgeGetStatusPtr.asFunction<
+        ffi.Pointer<ffi.Char> Function(ffi.Pointer<ffi.Char>)
       >();
 
   int ElectionEnable(int relayID, ffi.Pointer<ffi.Char> roomID) {
