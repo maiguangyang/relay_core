@@ -111,6 +111,30 @@ func (ss *SourceSwitcher) Close() error {
 	ss.onSourceChanged = nil
 	ss.onTrackChanged = nil
 
+	// 重置 RTP rewriting 状态，避免状态残留
+	ss.videoSnOffset = 0
+	ss.videoTsOffset = 0
+	ss.lastVideoSn = 0
+	ss.lastVideoTs = 0
+	ss.videoSynced = false
+	ss.videoReset = false
+
+	ss.audioSnOffset = 0
+	ss.audioTsOffset = 0
+	ss.lastAudioSn = 0
+	ss.lastAudioTs = 0
+	ss.audioSynced = false
+	ss.audioReset = false
+
+	// 重置统计计数器
+	ss.packetsFromSFU = 0
+	ss.packetsFromLocal = 0
+
+	// 重置状态标志
+	ss.sfuActive = false
+	ss.localActive = false
+	ss.localSharerID = ""
+
 	return nil
 }
 

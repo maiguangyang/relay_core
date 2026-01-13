@@ -90,8 +90,12 @@ class LocalShareBridge {
     try {
       // 1. 创建 Go 层桥接器
       final roomPtr = toCString(roomId);
-      int result = bindings.LocalShareBridgeCreate(roomPtr);
-      calloc.free(roomPtr);
+      int result;
+      try {
+        result = bindings.LocalShareBridgeCreate(roomPtr);
+      } finally {
+        calloc.free(roomPtr);
+      }
 
       if (result != 0) {
         _state = LocalShareBridgeState.failed;
@@ -100,8 +104,12 @@ class LocalShareBridge {
 
       // 2. 启动 Go 层 UDP 监听
       final roomPtr2 = toCString(roomId);
-      final port = bindings.LocalShareBridgeStart(roomPtr2, preferredPort);
-      calloc.free(roomPtr2);
+      int port;
+      try {
+        port = bindings.LocalShareBridgeStart(roomPtr2, preferredPort);
+      } finally {
+        calloc.free(roomPtr2);
+      }
 
       if (port < 0) {
         _state = LocalShareBridgeState.failed;
@@ -155,9 +163,13 @@ class LocalShareBridge {
     _socket = null;
 
     // 停止 Go 层桥接器
+    // 停止 Go 层桥接器
     final roomPtr = toCString(roomId);
-    bindings.LocalShareBridgeStop(roomPtr);
-    calloc.free(roomPtr);
+    try {
+      bindings.LocalShareBridgeStop(roomPtr);
+    } finally {
+      calloc.free(roomPtr);
+    }
 
     _state = LocalShareBridgeState.stopped;
   }
@@ -167,8 +179,11 @@ class LocalShareBridge {
     await stop();
 
     final roomPtr = toCString(roomId);
-    bindings.LocalShareBridgeDestroy(roomPtr);
-    calloc.free(roomPtr);
+    try {
+      bindings.LocalShareBridgeDestroy(roomPtr);
+    } finally {
+      calloc.free(roomPtr);
+    }
 
     _state = LocalShareBridgeState.idle;
   }
@@ -176,10 +191,12 @@ class LocalShareBridge {
   /// 获取 Go 层状态
   Map<String, dynamic> getStatus() {
     final roomPtr = toCString(roomId);
-    final jsonStr = fromCString(bindings.LocalShareBridgeGetStatus(roomPtr));
-    calloc.free(roomPtr);
-
-    if (jsonStr.isEmpty) return {};
-    return jsonDecode(jsonStr) as Map<String, dynamic>;
+    try {
+      final jsonStr = fromCString(bindings.LocalShareBridgeGetStatus(roomPtr));
+      if (jsonStr.isEmpty) return {};
+      return jsonDecode(jsonStr) as Map<String, dynamic>;
+    } finally {
+      calloc.free(roomPtr);
+    }
   }
 }

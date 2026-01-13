@@ -196,6 +196,14 @@ func (b *LocalShareBridge) Close() {
 	b.mu.Unlock()
 
 	b.Stop()
+
+	// 清理引用，帮助 GC 释放内存
+	b.mu.Lock()
+	b.bufferPool = nil
+	b.switcher = nil
+	b.onStateChanged = nil
+	b.onError = nil
+	b.mu.Unlock()
 }
 
 // GetPort 获取监听端口

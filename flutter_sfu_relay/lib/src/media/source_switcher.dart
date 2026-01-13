@@ -38,32 +38,40 @@ class SourceSwitcher {
   bool injectSfuPacket(bool isVideo, Uint8List data) {
     final roomPtr = toCString(roomId);
     final dataPtr = calloc<Uint8>(data.length);
-    dataPtr.asTypedList(data.length).setAll(0, data);
-    final result = bindings.SourceSwitcherInjectSFU(
-      roomPtr,
-      isVideo ? 1 : 0,
-      dataPtr.cast(),
-      data.length,
-    );
-    calloc.free(roomPtr);
-    calloc.free(dataPtr);
-    return result == 0;
+
+    try {
+      dataPtr.asTypedList(data.length).setAll(0, data);
+      final result = bindings.SourceSwitcherInjectSFU(
+        roomPtr,
+        isVideo ? 1 : 0,
+        dataPtr.cast(),
+        data.length,
+      );
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(dataPtr);
+    }
   }
 
   /// 注入本地 RTP 包
   bool injectLocalPacket(bool isVideo, Uint8List data) {
     final roomPtr = toCString(roomId);
     final dataPtr = calloc<Uint8>(data.length);
-    dataPtr.asTypedList(data.length).setAll(0, data);
-    final result = bindings.SourceSwitcherInjectLocal(
-      roomPtr,
-      isVideo ? 1 : 0,
-      dataPtr.cast(),
-      data.length,
-    );
-    calloc.free(roomPtr);
-    calloc.free(dataPtr);
-    return result == 0;
+
+    try {
+      dataPtr.asTypedList(data.length).setAll(0, data);
+      final result = bindings.SourceSwitcherInjectLocal(
+        roomPtr,
+        isVideo ? 1 : 0,
+        dataPtr.cast(),
+        data.length,
+      );
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(dataPtr);
+    }
   }
 
   /// 开始本地分享

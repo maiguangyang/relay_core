@@ -24,18 +24,24 @@ class Coordinator {
   bool enable() {
     final roomPtr = toCString(roomId);
     final peerPtr = toCString(localPeerId);
-    final result = bindings.CoordinatorEnable(roomPtr, peerPtr);
-    calloc.free(roomPtr);
-    calloc.free(peerPtr);
-    return result == 0;
+    try {
+      final result = bindings.CoordinatorEnable(roomPtr, peerPtr);
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(peerPtr);
+    }
   }
 
   /// 禁用协调器
   bool disable() {
     final roomPtr = toCString(roomId);
-    final result = bindings.CoordinatorDisable(roomPtr);
-    calloc.free(roomPtr);
-    return result == 0;
+    try {
+      final result = bindings.CoordinatorDisable(roomPtr);
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+    }
   }
 
   /// 添加 Peer
@@ -108,10 +114,13 @@ class Coordinator {
   bool startLocalShare(String sharerId) {
     final roomPtr = toCString(roomId);
     final sharerPtr = toCString(sharerId);
-    final result = bindings.CoordinatorStartLocalShare(roomPtr, sharerPtr);
-    calloc.free(roomPtr);
-    calloc.free(sharerPtr);
-    return result == 0;
+    try {
+      final result = bindings.CoordinatorStartLocalShare(roomPtr, sharerPtr);
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(sharerPtr);
+    }
   }
 
   /// 停止本地分享
@@ -126,32 +135,38 @@ class Coordinator {
   bool injectSfuPacket(bool isVideo, Uint8List data) {
     final roomPtr = toCString(roomId);
     final dataPtr = calloc<Uint8>(data.length);
-    dataPtr.asTypedList(data.length).setAll(0, data);
-    final result = bindings.CoordinatorInjectSFU(
-      roomPtr,
-      isVideo ? 1 : 0,
-      dataPtr.cast(),
-      data.length,
-    );
-    calloc.free(roomPtr);
-    calloc.free(dataPtr);
-    return result == 0;
+    try {
+      dataPtr.asTypedList(data.length).setAll(0, data);
+      final result = bindings.CoordinatorInjectSFU(
+        roomPtr,
+        isVideo ? 1 : 0,
+        dataPtr.cast(),
+        data.length,
+      );
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(dataPtr);
+    }
   }
 
   /// 注入本地 RTP 包
   bool injectLocalPacket(bool isVideo, Uint8List data) {
     final roomPtr = toCString(roomId);
     final dataPtr = calloc<Uint8>(data.length);
-    dataPtr.asTypedList(data.length).setAll(0, data);
-    final result = bindings.CoordinatorInjectLocal(
-      roomPtr,
-      isVideo ? 1 : 0,
-      dataPtr.cast(),
-      data.length,
-    );
-    calloc.free(roomPtr);
-    calloc.free(dataPtr);
-    return result == 0;
+    try {
+      dataPtr.asTypedList(data.length).setAll(0, data);
+      final result = bindings.CoordinatorInjectLocal(
+        roomPtr,
+        isVideo ? 1 : 0,
+        dataPtr.cast(),
+        data.length,
+      );
+      return result == 0;
+    } finally {
+      calloc.free(roomPtr);
+      calloc.free(dataPtr);
+    }
   }
 
   /// 获取状态 (JSON)
