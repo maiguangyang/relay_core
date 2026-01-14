@@ -1016,7 +1016,15 @@ class AutoCoordinator {
     try {
       // 动态请求 Bot Token
       final botToken = await config.onRequestBotToken!(roomId);
-      if (_disposed) return; // Prevent leak if disposed during await
+
+      // 关键修复：在 await 之后再次检查状态
+      // 如果在此期间已停止或销毁，立即返回，防止创建新资源导致泄漏
+      if (_disposed || _state == AutoCoordinatorState.idle) {
+        print(
+          '[AutoCoordinator] Coordinator stopped/disposed, aborting bridge connection',
+        );
+        return;
+      }
 
       if (botToken == null || botToken.isEmpty) {
         // 回调返回空，不启动影子连接

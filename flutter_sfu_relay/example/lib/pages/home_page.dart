@@ -1214,6 +1214,7 @@ class _HomePageState extends State<HomePage> {
 
               // 7. 激进清理缓存
               PaintingBinding.instance.imageCache.clear();
+              PaintingBinding.instance.imageCache.clearLiveImages();
 
               debugPrint(
                 '[ScreenShare] Track stopped and disposed (UI unmounted first)',

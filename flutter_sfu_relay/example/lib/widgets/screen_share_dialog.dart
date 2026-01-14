@@ -315,9 +315,23 @@ class _ScreenShareDialogState extends State<ScreenShareDialog>
     for (var sub in _subscriptions) {
       sub.cancel();
     }
+
+    // 关键修复：显式清理所有 source 的 thumbnail 缓存
+    // DesktopCapturerSource.thumbnail 是 Uint8List，可能被 MemoryImage 缓存
+    // 必须先 evict 所有 MemoryImage，否则会造成 30-50MB 的内存泄漏
+    for (var source in _sources.values) {
+      if (source.thumbnail != null && source.thumbnail!.isNotEmpty) {
+        MemoryImage(source.thumbnail!).evict();
+      }
+    }
+
     _sources.clear();
+    _selectedSource = null;
+
     // 强制清理图片缓存，防止缩略图占用内存
     PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+
     super.dispose();
   }
 
