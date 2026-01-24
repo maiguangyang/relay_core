@@ -102,6 +102,17 @@ const (
 	EventTypeProxyChange  = 6
 	EventTypeAnswer       = 7
 	EventTypeOffer        = 8
+	// Extended events for RelayRoom
+	EventTypeSubscriberJoined = 10
+	EventTypeSubscriberLeft   = 11
+	EventTypeRenegotiate      = 12
+
+	// Keepalive & Failover events
+	EventTypePeerOnline    = 20
+	EventTypePeerSlow      = 21
+	EventTypePeerOffline   = 22
+	EventTypePing          = 23
+	EventTypeRelayDisabled = 24
 )
 
 // ==========================================

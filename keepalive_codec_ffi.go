@@ -65,14 +65,6 @@ var (
 	keepaliveManagers sync.Map // roomID -> *sfu.KeepaliveManager
 )
 
-// 事件类型扩展
-const (
-	EventTypePeerOnline  = 20 // Peer 上线
-	EventTypePeerSlow    = 21 // Peer 响应缓慢
-	EventTypePeerOffline = 22 // Peer 离线
-	EventTypePing        = 23 // 需要发送 Ping
-)
-
 // registerKeepaliveManager 注册 KeepaliveManager
 func registerKeepaliveManager(roomID string, km *sfu.KeepaliveManager) {
 	keepaliveManagers.Store(roomID, km)

@@ -21,7 +21,6 @@ import (
 	"unsafe"
 
 	"github.com/maiguangyang/relay_core/pkg/sfu"
-	"github.com/maiguangyang/relay_core/pkg/signaling"
 	"github.com/maiguangyang/relay_core/pkg/utils"
 	"github.com/pion/webrtc/v4"
 )
@@ -29,13 +28,6 @@ import (
 // RelayRoom 实例管理
 var (
 	relayRooms sync.Map // roomID -> *sfu.RelayRoom
-)
-
-// 事件类型扩展
-const (
-	EventTypeSubscriberJoined = 10 // 订阅者加入
-	EventTypeSubscriberLeft   = 11 // 订阅者离开
-	EventTypeRenegotiate      = 12 // 需要重协商
 )
 
 // registerRelayRoom 注册 RelayRoom
@@ -97,7 +89,7 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 	room, err := sfu.NewRelayRoom(goRoomID, iceServers, opts...)
 	if err != nil {
 		utils.Error("Failed to create RelayRoom %s: %v", goRoomID, err)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomCreateFailed)
 	}
 
 	// 设置回调
@@ -113,31 +105,24 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 		// onICECandidate
 		func(rID, peerID string, candidate *webrtc.ICECandidate) {
 			if candidate != nil {
+				// [Decoupled] 直接发送原始 Candidate JSON，不封装 signaling.CandidateMessage
 				candidateJSON := candidate.ToJSON()
-				data, _ := json.Marshal(signaling.CandidateMessage{
-					Candidate:        candidateJSON.Candidate,
-					SDPMid:           candidateJSON.SDPMid,
-					SDPMLineIndex:    candidateJSON.SDPMLineIndex,
-					UsernameFragment: candidateJSON.UsernameFragment,
-				})
+				data, _ := json.Marshal(candidateJSON)
 				emitEvent(EventTypeICECandidate, rID, peerID, string(data))
 			}
 		},
 		// onNeedRenegotiate
 		func(rID, peerID string, offer string) {
-			data, _ := json.Marshal(map[string]string{
-				"type": "offer",
-				"sdp":  offer,
-			})
-			emitEvent(EventTypeRenegotiate, rID, peerID, string(data))
+			// [Decoupled] 直接发送原始 SDP 字符串，不封装为 map
+			emitEvent(EventTypeRenegotiate, rID, peerID, offer)
 		},
 		// onError
 		func(rID, peerID string, err error) {
-			data, _ := json.Marshal(signaling.ErrorMessage{
-				Code:    500,
-				Message: err.Error(),
-			})
-			emitEvent(EventTypeError, rID, peerID, string(data))
+			// [Enhanced Error Handling] 发送错误码，而不是 JSON
+			// 这里我们暂时只能发送 GenericError，因为 err 是 error 接口
+			// 实际项目中可以在 sfu 包中定义带 Code 的 Error 类型
+			// 目前简单处理：
+			emitEvent(EventTypeError, rID, peerID, "500") // 仍然传递 string，但在 Flutter 端解析为 int
 		},
 	)
 
@@ -154,7 +139,7 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 	// 注册 SourceSwitcher，让 LiveKitBridge 能够获取到同一个实例
 	registerSourceSwitcher(goRoomID, room.GetSourceSwitcher())
 	utils.Info("RelayRoom created: %s", goRoomID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomDestroy 销毁代理房间
@@ -164,7 +149,7 @@ func RelayRoomDestroy(roomID *C.char) C.int {
 	goRoomID := C.GoString(roomID)
 	unregisterRelayRoom(goRoomID)
 	utils.Info("RelayRoom destroyed: %s", goRoomID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // ==========================================
@@ -180,12 +165,12 @@ func RelayRoomBecomeRelay(roomID *C.char, peerID *C.char) C.int {
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	room.BecomeRelay(goPeerID)
 	utils.Info("Became Relay for room %s: %s", goRoomID, goPeerID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomIsRelay 检查是否是 Relay 节点
@@ -196,7 +181,7 @@ func RelayRoomIsRelay(roomID *C.char) C.int {
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	if room.IsRelay() {
@@ -221,7 +206,7 @@ func RelayRoomAddSubscriber(roomID *C.char, peerID *C.char, offerSDP *C.char) *C
 	room := getRelayRoom(goRoomID)
 	if room == nil {
 		utils.Error("RelayRoom not found: %s", goRoomID)
-		return nil
+		return nil // Dart 端需判断 nil
 	}
 
 	answerSDP, err := room.AddSubscriber(goPeerID, goOfferSDP)
@@ -243,16 +228,16 @@ func RelayRoomRemoveSubscriber(roomID *C.char, peerID *C.char) C.int {
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	if err := room.RemoveSubscriber(goPeerID); err != nil {
 		utils.Error("Failed to remove subscriber %s: %v", goPeerID, err)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	utils.Info("Subscriber removed: %s from room %s", goPeerID, goRoomID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomGetSubscribers 获取订阅者列表
@@ -299,28 +284,22 @@ func RelayRoomAddICECandidate(roomID *C.char, peerID *C.char, candidateJSON *C.c
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
-	var candidateMsg signaling.CandidateMessage
-	if err := json.Unmarshal([]byte(goCandidateJSON), &candidateMsg); err != nil {
+	// [Decoupled] 解析原始 Candidate JSON
+	var candidate webrtc.ICECandidateInit
+	if err := json.Unmarshal([]byte(goCandidateJSON), &candidate); err != nil {
 		utils.Error("Failed to parse ICE candidate: %v", err)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeInvalidParams)
 	}
 
-	candidateInit := webrtc.ICECandidateInit{
-		Candidate:        candidateMsg.Candidate,
-		SDPMid:           candidateMsg.SDPMid,
-		SDPMLineIndex:    candidateMsg.SDPMLineIndex,
-		UsernameFragment: candidateMsg.UsernameFragment,
-	}
-
-	if err := room.AddICECandidate(goPeerID, candidateInit); err != nil {
+	if err := room.AddICECandidate(goPeerID, candidate); err != nil {
 		utils.Error("Failed to add ICE candidate for %s: %v", goPeerID, err)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // ==========================================
@@ -378,16 +357,16 @@ func RelayRoomHandleAnswer(roomID *C.char, peerID *C.char, answerSDP *C.char) C.
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	if err := room.HandleSubscriberAnswer(goPeerID, goAnswerSDP); err != nil {
 		utils.Error("Failed to handle answer from %s: %v", goPeerID, err)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	utils.Debug("Answer handled for %s in room %s", goPeerID, goRoomID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // ==========================================
@@ -429,12 +408,12 @@ func RelayRoomInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, data
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	switcher := room.GetSourceSwitcher()
 	if switcher == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	// 优化：使用 sync.Pool 复用内存
@@ -458,12 +437,12 @@ func RelayRoomInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, data
 	// 注入数据 (WritePacket 是同步的，不会持有 buffer 引用，所以可以安全回收)
 	if err := switcher.InjectSFUPacket(isVideo != 0, buf); err != nil {
 		packetPool.Put(buf) // 即使出错也回收
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	// 回收 buffer
 	packetPool.Put(buf)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomInjectLocal 注入本地分享 RTP 包（通过 RelayRoom）
@@ -474,12 +453,12 @@ func RelayRoomInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	switcher := room.GetSourceSwitcher()
 	if switcher == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	// 优化：使用 sync.Pool 复用内存
@@ -496,11 +475,11 @@ func RelayRoomInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 
 	if err := switcher.InjectLocalPacket(isVideo != 0, buf); err != nil {
 		packetPool.Put(buf)
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	packetPool.Put(buf)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomStartLocalShare 开始本地分享
@@ -512,12 +491,12 @@ func RelayRoomStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	switcher := room.GetSourceSwitcher()
 	if switcher == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
@@ -543,7 +522,7 @@ func RelayRoomStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
 	room.TriggerRenegotiation()
 
 	utils.Info("Local share started in room %s by %s, codec=%s", goRoomID, id, codec)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // RelayRoomStopLocalShare 停止本地分享
@@ -554,12 +533,12 @@ func RelayRoomStopLocalShare(roomID *C.char) C.int {
 
 	room := getRelayRoom(goRoomID)
 	if room == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeRoomNotFound)
 	}
 
 	switcher := room.GetSourceSwitcher()
 	if switcher == nil {
-		return C.int(-1)
+		return C.int(sfu.ErrCodeGenericError)
 	}
 
 	switcher.StopLocalShare()
@@ -568,7 +547,7 @@ func RelayRoomStopLocalShare(roomID *C.char) C.int {
 	room.TriggerRenegotiation()
 
 	utils.Info("Local share stopped in room %s", goRoomID)
-	return C.int(0)
+	return C.int(sfu.ErrCodeOK)
 }
 
 // unsafePointer 辅助函数

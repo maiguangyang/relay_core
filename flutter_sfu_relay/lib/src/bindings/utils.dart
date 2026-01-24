@@ -6,6 +6,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import '../enums_error.dart';
 
 /// Convert Dart string to C string (caller must free)
 Pointer<Char> toCString(String s) => s.toNativeUtf8().cast<Char>();
@@ -16,4 +17,13 @@ String fromCString(Pointer<Char> ptr) {
   final result = ptr.cast<Utf8>().toDartString();
   bindings.FreeString(ptr);
   return result;
+}
+
+/// 检查 FFI 调用结果
+///
+/// 如果返回非 0，抛出 [RelayException]
+void checkResult(int code) {
+  if (code != RelayErrorCode.ok.value) {
+    throw RelayException(RelayErrorCode.fromValue(code));
+  }
 }

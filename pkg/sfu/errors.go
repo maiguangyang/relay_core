@@ -1,34 +1,58 @@
 /*
  * @Author: Marlon.M
  * @Email: maiguangyang@163.com
- * @Date: 2025-12-24
+ * @Date: 2026-01-24
+ *
+ * Relay Core Errors
+ * 定义系统统一的错误码
  */
 package sfu
 
 import "errors"
 
+// Standard Errors
 var (
-	// ErrRoomClosed indicates the room has been closed
-	ErrRoomClosed = errors.New("room is closed")
-
-	// ErrPeerNotFound indicates the peer was not found
-	ErrPeerNotFound = errors.New("peer not found")
-
-	// ErrPeerClosed indicates the peer has been closed
-	ErrPeerClosed = errors.New("peer is closed")
-
-	// ErrConnectionFailed indicates the WebRTC connection failed
-	ErrConnectionFailed = errors.New("connection failed")
-
-	// ErrICEFailed indicates ICE connection failed
-	ErrICEFailed = errors.New("ICE connection failed")
-
-	// ErrForwarderClosed indicates the forwarder has been closed
+	ErrRoomClosed      = errors.New("room is closed")
+	ErrPeerNotFound    = errors.New("peer not found")
+	ErrPeerClosed      = errors.New("peer is closed")
+	ErrICEFailed       = errors.New("ice connection failed")
 	ErrForwarderClosed = errors.New("forwarder is closed")
+)
 
-	// ErrInvalidSDP indicates invalid SDP
-	ErrInvalidSDP = errors.New("invalid SDP")
+// RelayErrorCode 错误码枚举
+type RelayErrorCode int
 
-	// ErrTrackNotFound indicates the track was not found
-	ErrTrackNotFound = errors.New("track not found")
+const (
+	// ErrCodeOK 成功
+	ErrCodeOK RelayErrorCode = 0
+
+	// ErrCodeGenericError 通用错误
+	ErrCodeGenericError RelayErrorCode = 1
+
+	// ErrCodeRoomNotFound 房间不存在
+	ErrCodeRoomNotFound RelayErrorCode = 100
+
+	// ErrCodeRoomClosed 房间已关闭
+	ErrCodeRoomClosed RelayErrorCode = 101
+
+	// ErrCodeRoomCreateFailed 房间创建失败
+	ErrCodeRoomCreateFailed RelayErrorCode = 102
+
+	// ErrCodePeerNotFound Peer 未找到
+	ErrCodePeerNotFound RelayErrorCode = 200
+
+	// ErrCodePeerClosed Peer 连接已关闭
+	ErrCodePeerClosed RelayErrorCode = 201
+
+	// ErrCodePeerConnectionFailed 建立 PeerConnection 失败
+	ErrCodePeerConnectionFailed RelayErrorCode = 202
+
+	// ErrCodeInvalidParams 参数无效（如 JSON 解析失败）
+	ErrCodeInvalidParams RelayErrorCode = 300
+
+	// ErrCodeSignalingError 信令相关错误
+	ErrCodeSignalingError RelayErrorCode = 400
+
+	// ErrCodeInternalError 内部错误
+	ErrCodeInternalError RelayErrorCode = 500
 )

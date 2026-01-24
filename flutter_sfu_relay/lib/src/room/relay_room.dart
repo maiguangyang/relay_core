@@ -9,6 +9,7 @@ import '../core/coordinator.dart';
 import '../callbacks/callbacks.dart';
 import '../signaling/signaling.dart';
 import '../enums.dart';
+import '../enums_error.dart';
 
 /// 房间状态
 enum RoomState {
@@ -284,7 +285,28 @@ class RelayRoom {
         _relayChangedController.add(event.data ?? event.peerId);
         break;
       case SfuEventType.error:
-        _errorController.add(event.data ?? 'Unknown error');
+        // [New] Handle integer error code from string
+        final code = int.tryParse(event.data ?? '') ?? 500;
+        final error = RelayErrorCode.fromValue(code);
+        _errorController.add('Error: $error');
+        break;
+      case SfuEventType.iceCandidate:
+        // [New] Forward raw candidate via signaling
+        if (event.data != null) {
+          // event.data is raw candidate JSON from Go layer
+          signaling.sendCandidate(roomId, event.peerId, event.data!);
+        }
+        break;
+      case SfuEventType.renegotiate:
+        // [New] Forward raw SDP offer via signaling
+        if (event.data != null) {
+          // event.data is raw SDP string from Go layer
+          signaling.sendOffer(roomId, event.peerId, event.data!);
+        }
+        break;
+      case SfuEventType.subscriberJoined:
+      case SfuEventType.subscriberLeft:
+        // Handled by Go layer logic, but we might want to log or update local state
         break;
       default:
         break;
