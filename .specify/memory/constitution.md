@@ -1,50 +1,77 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# Relay Core Constitution
 
-## Core Principles
+> **Master Directive**: This document is the supreme architectural guideline for the Relay Core project. All AI-generated code, refactoring, and architectural decisions **MUST** adhere to these principles.
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+## I. Core Philosophy (The "Why")
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### 1. The "Brain & Muscle" Split
+*   **Dart (Flutter) is the Brain**: Handles UI, Signaling, Business Logic, and User Interactions.
+*   **Go (Pion) is the Muscle**: Handles RTP forwarding, Networking (UDP/TCP), Congestion Control, and heavy computation.
+*   **Rule**: Never do heavy media processing in Dart. Never do complex UI state management in Go.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### 2. Local-First & P2P Priority
+*   The system is designed to save bandwidth and reduce latency.
+*   **Priority 1**: Direct P2P (LAN).
+*   **Priority 2**: Relay via Go Core (LAN).
+*   **Priority 3**: Cloud SFU (Internet/Fallback).
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### 3. Stability & Failover
+*   The Relay system is dynamic. Devices may join/leave/crash at any time.
+*   **Code Principle**: Fail-fast and self-heal. If a Relay node dies, the `AutoCoordinator` must verify and elect a new one within seconds.
+*   **Resource Safety**: Strict cleanup of Native/Go resources (memory, sockets, ports) is non-negotiable. Leak zero bytes.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+---
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## II. Architecture & Implementation Rules
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### 1. FFI Boundary (The Danger Zone)
+*   **String Encoding**: Always use `toNativeUtf8()` in Dart and `C.GoString` in Go.
+*   **Memory Management**:
+    *   **Dart -> Go**: Dart allocates, Dart frees. Use `try/finally` blocks in Dart to ensuring `calloc.free` is *always* called for C-Strings passed to Go.
+    *   **Go -> Dart**: Go returns `C.CString`, Dart converts to String, then Dart calls a dedicated `FreeString` FFI function to let Go free the memory.
+*   **Zero Copy Goal**: For high-frequency data (RTP packets), avoid copying where possible. Use pointers or OS-socket bridges (like the UDP Loopback architecture) instead of passing `Uint8List` through FFI if frequency > 60Hz.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+### 2. Go Core Development
+*   **Concurrency**: Use `sync.RWMutex` for all map access (`relayRooms`, `localShareBridges`).
+*   **Atomic Stats**: Use `sync/atomic` for all high-frequency counters (packets sent/received).
+*   **Context Management**: Every potentially blocking operation (network I/O) must have a timeout or be interruptible via a `closed` channel.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### 3. Flutter/Dart Development
+*   **State Management**: Use `AutoCoordinator` as the singleton source of truth for Relay state.
+*   **UI Updates**: Listen to `AutoCoordinator` streams/callbacks. Do not poll.
+*   **Asset Management**: Call `dispose()` / `stop()` explicitly on all FFI bridges (`LiveKitBridge`, `RelayRoom`) when pages unmount.
 
-## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
+---
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+## III. Development Workflow
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+### 1. The "Rebuild" Cycle
+When modifying **ANY** Go code (`pkg/` or `*.go`):
+1.  **Modify Go Code**.
+2.  **Run Tests**: `go test ./pkg/...`
+3.  **Rebuild Native Libs**:
+    ```bash
+    cd relay_core
+    ./build_all.sh  # Or make macos/android/ios specifically
+    ```
+4.  **Run Flutter**: `flutter run`
+*   *Attempting to run Flutter without rebuilding Go libs will use the old binary and cause confusing bugs.*
+
+---
+
+## IV. Naming Conventions
+
+*   **Go structs**: `UpperCamelCase` (Exported), `lowerCamelCase` (Private).
+*   **FFI Functions**: `PascalCase` (e.g., `RelayRoomCreate`).
+*   **Dart Classes**: `PascalCase` (e.g., `RelayRoom`).
+*   **Log Tags**: `[RelayCore]`, `[AutoCoord]`, `[FFI]`.
+
+---
+
+## V. Governance
+
+1.  **Strict Typing**: No `dynamic` in core logic.
+2.  **Documentation**: All FFI exported functions must have comments explaining params and return values (0 = Success, -1 = Fail).
+3.  **Dependencies**: Keep `go.mod` and `pubspec.yaml` minimal. Do not add heavy dependencies without justification.
+
+**Version**: 1.0.0 | **Ratified**: 2026-01-27
