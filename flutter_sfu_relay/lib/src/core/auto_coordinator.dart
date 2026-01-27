@@ -184,6 +184,7 @@ class AutoCoordinator {
   // P2P 订阅者连接（当本机不是 Relay 且在局域网时使用）
   RTCPeerConnection? _p2pConnection;
   MediaStream? _p2pRemoteStream;
+  RTCVideoRenderer? _p2pRenderer; // 缓存的 P2P 渲染器
   bool _p2pConnected = false;
 
   // 屏幕共享状态
@@ -258,6 +259,9 @@ class AutoCoordinator {
   /// P2P 远程视频流（订阅者从 Relay 接收的视频）
   /// 只有局域网订阅者才会有此流，蜂窝网络设备为 null
   MediaStream? get p2pRemoteStream => _p2pRemoteStream;
+
+  /// P2P 渲染器
+  RTCVideoRenderer? get p2pRenderer => _p2pRenderer;
 
   /// P2P 连接是否已建立
   bool get hasP2PConnection => _p2pConnected && _p2pRemoteStream != null;
@@ -389,6 +393,10 @@ class AutoCoordinator {
 
     // 断开 P2P 订阅者连接
     await _closeP2PConnection();
+
+    // 销毁缓存的渲染器
+    await _p2pRenderer?.dispose();
+    _p2pRenderer = null;
 
     _peers.clear();
     _currentRelay = null;

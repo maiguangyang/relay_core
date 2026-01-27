@@ -13,6 +13,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:flutter_sfu_relay/src/widgets/relay_screen_share_view.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/control_bar.dart';
@@ -88,14 +89,6 @@ class _HomePageState extends State<HomePage> {
   // 网络变化监听
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   ConnectionType? _lastConnectionType;
-
-  // P2P 远程视频流（从 Relay 接收）
-  RTCVideoRenderer? _p2pVideoRenderer;
-  // ignore: unused_field - kept for debugging and future extensions
-  MediaStream? _p2pRemoteStream;
-  StreamSubscription<MediaStream?>? _p2pStreamSubscription;
-  bool _hasP2PVideo = false;
-  bool _p2pFirstFrameRendered = false; // 视频首帧是否已渲染
 
   // AutoCoordinator 订阅（必须取消以避免内存泄漏）
   StreamSubscription<AutoCoordinatorState>? _stateSubscription;
@@ -408,51 +401,6 @@ class _HomePageState extends State<HomePage> {
       // 5. 启动
       await _autoCoord!.start();
 
-      // 6. 监听 P2P 远程流（局域网订阅者从 Relay 接收视频）
-      _p2pStreamSubscription = _autoCoord!.onRemoteStream.listen((
-        stream,
-      ) async {
-        if (stream != null) {
-          debugPrint('[P2P] Received remote stream from Relay');
-          // 初始化视频渲染器
-          _p2pVideoRenderer ??= RTCVideoRenderer();
-          await _p2pVideoRenderer!.initialize();
-
-          // 设置首帧渲染回调 - 当第一个视频帧被渲染时调用
-          _p2pVideoRenderer!.onFirstFrameRendered = () {
-            debugPrint('[P2P] First video frame rendered!');
-            if (mounted) {
-              setState(() {
-                _p2pFirstFrameRendered = true;
-              });
-            }
-          };
-
-          _p2pVideoRenderer!.srcObject = stream;
-          _p2pRemoteStream = stream;
-          if (mounted) {
-            setState(() {
-              _hasP2PVideo = true;
-              _p2pFirstFrameRendered = false; // 重置首帧状态
-            });
-            // P2P 连接后重新检测屏幕共享
-            // 因为 screenShare 消息可能在 P2P 连接之前就收到了
-            _updateParticipants();
-          }
-        } else {
-          debugPrint('[P2P] Remote stream disconnected');
-          _p2pVideoRenderer?.srcObject = null;
-          _p2pRemoteStream = null;
-          if (mounted) {
-            setState(() {
-              _hasP2PVideo = false;
-              _p2pFirstFrameRendered = false; // 重置首帧状态
-            });
-            _updateParticipants();
-          }
-        }
-      });
-
       setState(() {
         _isConnecting = false;
         _isInMeeting = true;
@@ -564,41 +512,18 @@ class _HomePageState extends State<HomePage> {
   /// 局域网订阅者：取消 SFU 订阅（只用 P2P）
   /// 蜂窝网络设备：订阅 SFU 并配置画质
   void _configureVideoQuality(lk.RemoteTrackPublication pub) {
-    final isRelay = _autoCoord?.isRelay ?? false;
-    final isOnLan =
-        _lastConnectionType == ConnectionType.ethernet ||
-        _lastConnectionType == ConnectionType.wifi;
-
-    // Relay 节点 (Loopback):
-    // Relay Core (Shadow Connection) 负责从 SFU 拉流。
-    // Host UI (Main Connection) 通过 Loopback P2P 从本地 Core 获取流。
-    // 因此，Main Connection 应该取消订阅 SFU 以避免双重带宽消耗。
-    if (isRelay) {
-      if (pub.subscribed) {
-        debugPrint(
-          '[VideoQuality] Relay Host (Loopback): unsubscribing SFU (consuming via Loopback)',
-        );
-        pub.unsubscribe();
-      }
-      return;
-    }
-
-    // 局域网订阅者：不需要订阅 SFU（只用 P2P 流）
-    if (isOnLan) {
-      if (pub.subscribed) {
-        debugPrint(
-          '[VideoQuality] LAN subscriber: unsubscribing SFU (P2P only)',
-        );
-        pub.unsubscribe();
-      }
-      return;
-    }
+    // final isRelay = _autoCoord?.isRelay ?? false;
+    // final isOnLan =
+    //    _lastConnectionType == ConnectionType.ethernet ||
+    //    _lastConnectionType == ConnectionType.wifi;
 
     // 蜂窝网络设备：订阅 SFU 并节省流量
-    if (!pub.subscribed) {
-      debugPrint('[VideoQuality] Cellular: subscribing SFU');
-      pub.subscribe();
-    }
+    // 注意：默认 room autoSubscribe=true，或者由 onCloudSubscriptionChanged 处理恢复
+    // 这里只需配置画质
+    // if (!pub.subscribed) {
+    //   debugPrint('[VideoQuality] Cellular: subscribing SFU');
+    //   pub.subscribe();
+    // }
     // 蜂窝网络使用较低画质以节省流量
     pub.setVideoQuality(lk.VideoQuality.MEDIUM);
     pub.setVideoFPS(15);
@@ -638,12 +563,13 @@ class _HomePageState extends State<HomePage> {
             // 2. Relay（影子连接）：需要订阅 SFU
             // 3. 局域网订阅者（P2P）：即使 track 为 null，只要有 P2P 连接并且该参与者是屏幕共享者就有效
             //    因为 unsubscribe SFU 后 track 会变成 null，
-            //    但 P2P 流是通过 _p2pVideoRenderer 渲染的
+            //    但 P2P 流是通过 RelayScreenShareView 渲染的
+            final hasP2P = _autoCoord?.p2pRemoteStream != null;
             final hasValidSource =
                 isLocal ||
                 pub.subscribed ||
                 pub.track != null ||
-                (_hasP2PVideo && p.identity == screenSharerPeerId);
+                (hasP2P && p.identity == screenSharerPeerId);
 
             if (hasValidSource) {
               // 根据网络状况请求合适的画质
@@ -662,7 +588,7 @@ class _HomePageState extends State<HomePage> {
       // 当 B 重新加入时，可能还没有接收到 SFU 的 TrackPublication 更新，
       // 但 AutoCoordinator 已经通过信令知道谁在共享屏幕
       if (_screenShareParticipant == null &&
-          _hasP2PVideo &&
+          _autoCoord?.p2pRemoteStream != null &&
           screenSharerPeerId != null) {
         // 从参与者列表中找到屏幕共享者
         for (final p in _participants) {
@@ -685,7 +611,8 @@ class _HomePageState extends State<HomePage> {
     bool shouldSubscribe,
   ) {
     // 只有非 Relay 的设备才需要管理
-    if (_autoCoord?.isRelay == true) return;
+    // 只有非 Relay 的设备才需要管理
+    // if (_autoCoord?.isRelay == true) return; // FIX: Relay Host (Loopback) 也需要节省带宽，移除此检查
 
     // 在参与者中查找屏幕共享者
     lk.RemoteParticipant? sharer;
@@ -889,16 +816,7 @@ class _HomePageState extends State<HomePage> {
     _localParticipant = null;
 
     // 4. 清理 P2P 视频渲染器
-    _p2pStreamSubscription?.cancel();
-    _p2pStreamSubscription = null;
-    _p2pVideoRenderer?.srcObject = null;
-    _p2pVideoRenderer?.dispose();
-    _p2pVideoRenderer = null;
-    // 关键修复：MediaStream 需要 dispose() 释放 Native 资源
-    await _p2pRemoteStream?.dispose();
-    _p2pRemoteStream = null;
-    _hasP2PVideo = false;
-    _p2pFirstFrameRendered = false;
+    // P2P resources managed by RelayScreenShareView implicitly
 
     // 5. 关键修复：清理屏幕共享资源（防止 Native Source 和 Go Bridge 泄漏）
     if (_localScreenShareTrack != null) {
@@ -1338,59 +1256,35 @@ class _HomePageState extends State<HomePage> {
 
     // 获取屏幕共享视频轨道
     lk.VideoTrack? screenTrack;
-    final isRelay = _autoCoord?.isRelay ?? false;
 
-    // 关键修复 (Root Cause Fix):
-    // 对于本地分享者，强制使用 _localScreenShareTrack 作为唯一真理来源 (Source of Truth)。
-    // 即使 SDK 内部列表 (videoTrackPublications) 还没更新，只要 _localScreenShareTrack 被置为 null，
-    // UI 就必须立即停止渲染。这确保了 stop() 流程中的 "Unmount UI -> Wait -> Dispose" 顺序生效。
     if (isSharerLocal) {
       screenTrack = _localScreenShareTrack;
     } else {
-      // 远程分享者逻辑保持不变
+      // 远程分享者逻辑
       for (final pub in screenSharer.videoTrackPublications) {
         if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
+          if (pub.track != null) {
+            screenTrack = pub.track as lk.VideoTrack;
+          }
           if (pub is lk.RemoteTrackPublication) {
-            // Relay 需要主动订阅来获取视频源
-            // 4. 重用现有的 P2P 连接（Loopback）
-            // 4. 重用现有的 P2P 连接（Loopback）
-            final remoteStream = _autoCoord?.p2pRemoteStream;
-            if (remoteStream != null && _p2pVideoRenderer != null) {
-              // srcObject default logic handled by null checking
-              if (_p2pVideoRenderer!.srcObject != null &&
-                  _p2pVideoRenderer!.srcObject!.id == remoteStream.id) {
-                // 流没有变化，不需要重新订阅
-                // 注意：这里是在 for 循环中，如果我们已经有了渲染器，就不需要再处理这个 Publication 了
-                // 但仍需继续执行 _configureVideoQuality 以确保 SFU 订阅状态正确
-              } else {
-                debugPrint(
-                  '[Relay] Subscribing to remote screen share track. '
-                  'Renderer ID: ${_p2pVideoRenderer!.srcObject?.id}, '
-                  'New Stream ID: ${remoteStream.id}',
-                );
-                setState(() {
-                  _p2pVideoRenderer!.srcObject = remoteStream;
-                });
-              }
-            }
-            if (isRelay && !pub.subscribed) {
-              debugPrint('[Relay] Subscribing to remote screen share track');
-            }
             _configureVideoQuality(pub);
           }
-          // 检查是否可以获取 track
-          if (pub.subscribed || _hasP2PVideo) {
-            if (pub.track != null) {
-              screenTrack = pub.track as lk.VideoTrack;
-            }
-            break;
-          }
+          break;
         }
       }
     }
 
-    // 使用单一流架构的渲染器
-    final videoWidget = _buildScreenShareRenderer(screenTrack, isSharerLocal);
+    // 使用单一流架构的渲染器 (插件组件)
+    final videoWidget = RelayScreenShareView(
+      autoCoordinator: _autoCoord,
+      requestP2P: true, // Fullscreen mode usually prefers P2P if available
+      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+      sfuView: _screenShareParticipant != null && screenTrack != null
+          ? lk.VideoTrackRenderer(screenTrack, fit: lk.VideoViewFit.contain)
+          : null,
+      fallbackBuilder: (context) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1410,7 +1304,7 @@ class _HomePageState extends State<HomePage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 全屏视频 - 使用单一流架构渲染器
+              // 全屏视频
               Center(
                 child: FittedBox(
                   fit: BoxFit.contain,
@@ -1485,7 +1379,7 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-      ), // closes KeyboardListener
+      ),
     );
   }
 
@@ -2447,116 +2341,6 @@ class _HomePageState extends State<HomePage> {
     return name.substring(0, name.length.clamp(0, 1)).toUpperCase();
   }
 
-  /// 构建屏幕共享视频渲染器
-  /// 单一流架构：局域网设备只用 P2P，蜂窝设备只用 LiveKit
-  /// 流切换逻辑在插件层完成，UI 层不再处理切换
-  Widget _buildScreenShareRenderer(
-    lk.VideoTrack? screenTrack,
-    bool isSharerLocal,
-  ) {
-    // 如果是本地分享，直接用 LiveKit 渲染器
-    if (isSharerLocal && screenTrack != null) {
-      return lk.VideoTrackRenderer(screenTrack);
-    }
-
-    final isRelay = _autoCoord?.isRelay ?? false;
-    final isOnLan =
-        _lastConnectionType == ConnectionType.ethernet ||
-        _lastConnectionType == ConnectionType.wifi;
-
-    // ========== 单一流架构 ==========
-    // 1. Relay 节点：使用 LiveKit 直连（它是源头，不需要 P2P）
-    // 2. 局域网订阅者：只使用 P2P 流，等待 P2P 就绪
-    // 3. 蜂窝网络设备：只使用 LiveKit 直连
-
-    // 1. Relay 节点 (Loopback)：作为特殊的局域网订阅者，必须使用 P2P 流（Loopback）
-    //    虽然它有 SFU 连接，但为了节省下行带宽，SFU Track 被主动取消订阅了。
-    //    因此必须渲染 _p2pVideoRenderer。
-    if (isRelay || isOnLan) {
-      // Relay 或 局域网订阅者：优先使用 P2P 流
-      if (_hasP2PVideo && _p2pVideoRenderer != null) {
-        // P2P 流已就绪
-        if (_p2pFirstFrameRendered) {
-          // 首帧已渲染，只显示视频
-          return RTCVideoView(
-            _p2pVideoRenderer!,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-          );
-        } else {
-          // 首帧未渲染，使用 Stack 叠加加载指示器
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              // 底层：视频渲染器（等待首帧）
-              RTCVideoView(
-                _p2pVideoRenderer!,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-              ),
-              // 上层：加载指示器（首帧渲染后会因 setState 移除）
-              _buildP2PLoadingIndicator(),
-            ],
-          );
-        }
-      } else {
-        // P2P 流还未就绪，显示加载指示器
-        return _buildP2PLoadingIndicator();
-      }
-    } else {
-      // 蜂窝网络设备：只使用 LiveKit 直连
-      if (screenTrack != null) {
-        return lk.VideoTrackRenderer(screenTrack);
-      }
-    }
-
-    // 无视频
-    return const Center(
-      child: Icon(Icons.screen_share, size: 64, color: Colors.white30),
-    );
-  }
-
-  /// P2P 视频加载中的指示器
-  Widget _buildP2PLoadingIndicator({String? message}) {
-    return Container(
-      color: Colors.black,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // 根据容器宽度自适应大小
-          final width = constraints.maxWidth;
-          final spinnerSize = (width * 0.08).clamp(24.0, 48.0);
-          final fontSize = (width * 0.04).clamp(14.0, 24.0);
-          final spacing = (width * 0.03).clamp(12.0, 24.0);
-
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: spinnerSize,
-                  height: spinnerSize,
-                  child: CircularProgressIndicator(
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                      Colors.white54,
-                    ),
-                    strokeWidth: (spinnerSize / 12).clamp(2.0, 4.0),
-                  ),
-                ),
-                SizedBox(height: spacing),
-                Text(
-                  message ?? (_hasP2PVideo ? '正在等待视频画面...' : '正在建立局域网连接...'),
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.7),
-                    fontSize: fontSize,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   /// 特刊布局：屏幕共享者放大显示
   Widget _buildFeaturedLayout() {
     final screenSharer = _screenShareParticipant!;
@@ -2564,30 +2348,36 @@ class _HomePageState extends State<HomePage> {
 
     // 获取屏幕共享视频轨道
     lk.VideoTrack? screenTrack;
-    final isRelay = _autoCoord?.isRelay ?? false;
     for (final pub in screenSharer.videoTrackPublications) {
       if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
-        // 关键修复：Relay 需要先订阅 track，即使当前未订阅
+        if (pub.track != null) {
+          screenTrack = pub.track as lk.VideoTrack;
+        }
         if (pub is lk.RemoteTrackPublication) {
-          if (isRelay && !pub.subscribed) {
-            debugPrint('[Relay] Subscribing to remote screen share track');
-          }
           _configureVideoQuality(pub);
         }
-        // 检查是否可以获取 track
-        if (pub.subscribed || _hasP2PVideo || isSharerLocal) {
-          if (pub.track != null) {
-            screenTrack = pub.track as lk.VideoTrack;
-          }
-          break;
-        }
+        break;
       }
     }
 
-    // 构建视频渲染器：优先使用 P2P 流（局域网订阅者）
-    final videoRenderer = _buildScreenShareRenderer(screenTrack, isSharerLocal);
-
-    // 全屏模式
+    // 使用单一流架构组件
+    final videoRenderer = RelayScreenShareView(
+      autoCoordinator: _autoCoord,
+      requestP2P:
+          isSharerLocal ||
+          (_autoCoord?.isRelay ?? false) ||
+          _lastConnectionType == ConnectionType.ethernet ||
+          _lastConnectionType == ConnectionType.wifi,
+      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+      sfuView: screenTrack != null
+          ? lk.VideoTrackRenderer(screenTrack, fit: lk.VideoViewFit.contain)
+          : null,
+      fallbackBuilder: (context) => const Center(
+        child: Text('等待屏幕共享...', style: TextStyle(color: Colors.white54)),
+      ),
+      loadingBuilder: (context) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
+    ); // 全屏模式
     if (_isScreenShareFullscreen) {
       return GestureDetector(
         onDoubleTap: _exitFullscreen,
@@ -2596,14 +2386,10 @@ class _HomePageState extends State<HomePage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 全屏视频 - 优先使用 P2P 流
+              // 全屏视频
               FittedBox(
                 fit: BoxFit.contain,
-                child: SizedBox(
-                  width: 1920,
-                  height: 1080,
-                  child: videoRenderer,
-                ),
+                child: SizedBox(width: 1920, child: videoRenderer),
               ),
               // 退出全屏按钮
               Positioned(
@@ -2688,78 +2474,31 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(13),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // 屏幕共享视频 - 优先使用 P2P 流
-                      Container(
-                        color: Colors.black,
-                        child: FittedBox(
-                          fit: BoxFit.contain,
-                          child: SizedBox(
-                            width: 1920,
-                            height: 1080,
-                            child: videoRenderer,
-                          ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    videoRenderer,
+                    // 双击提示
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black38,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '双击全屏',
+                          style: TextStyle(color: Colors.white70, fontSize: 10),
                         ),
                       ),
-                      // 分享者标签
-                      Positioned(
-                        bottom: 12,
-                        left: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.secondaryColor,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.screen_share,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                isSharerLocal
-                                    ? '你正在分享屏幕'
-                                    : '${screenSharer.identity} 的屏幕',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // 全屏按钮
-                      Positioned(
-                        bottom: 12,
-                        right: 12,
-                        child: IconButton(
-                          onPressed: _enterFullscreen,
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.black54,
-                            padding: const EdgeInsets.all(8),
-                          ),
-                          icon: const Icon(
-                            Icons.fullscreen,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

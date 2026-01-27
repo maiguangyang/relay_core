@@ -32,3 +32,6 @@ export 'src/webrtc/webrtc.dart';
 
 // ========== 底层绑定 ==========
 export 'src/bindings/bindings.dart';
+
+// ========== 组件 ==========
+export 'src/widgets/relay_screen_share_view.dart';
