@@ -1209,6 +1209,12 @@ class AutoCoordinator {
       case SfuEventType.iceCandidate:
         // Relay 生成了面向订阅者的 ICE 候选，通过信令发送给订阅者
         if (event.data != null && event.peerId.isNotEmpty) {
+          // Loopback Handling: 如果 Candidate 是给自己的 (Relay Host)
+          if (isRelay && event.peerId == localPeerId) {
+            _handleLoopbackCandidate(event.data!);
+            return;
+          }
+
           // event.data 是 JSON String，直接发送
           print(
             '[Relay] Forwarding ICE candidate to subscriber: ${event.peerId}',
@@ -1221,6 +1227,12 @@ class AutoCoordinator {
         // Go 层 ReplaceTrack 后需要重协商，将新 Offer 发送给订阅者
         // 这解决了重复屏幕共享后订阅者黑屏的问题
         if (event.data != null && event.peerId.isNotEmpty) {
+          // Loopback Handling: 如果 Renego 是给自己的
+          if (isRelay && event.peerId == localPeerId) {
+            _handleLoopbackRenegotiation(event.data!);
+            return;
+          }
+
           print(
             '[Relay] Sending renegotiation offer to subscriber: ${event.peerId}',
           );
@@ -1347,6 +1359,11 @@ class AutoCoordinator {
 
   // ========== P2P 订阅者连接 ==========
 
+  /* Loopback Mode Support:
+   * 即使是 Relay (isRelay=true)，如果配置启用 Loopback，也允许建立 P2P 连接到自己。
+   * 这允许 Host 设备通过本地 Relay Core 观看视频，而不是从云端拉流。
+   */
+
   /// 创建到 Relay 的 P2P 连接（订阅者使用）
   Future<void> _createP2PConnectionToRelay(
     String relayId, {
@@ -1358,8 +1375,11 @@ class AutoCoordinator {
       return;
     }
 
-    // Relay 不需要创建 P2P 连接
-    if (isRelay) return;
+    // Relay 通常不需要创建 P2P 连接，除非是 Loopback 模式 (Relay 自己查看自己的流)
+    // 在 Loopback 模式下，Relay 会建立一个 PeerConnection 到自己的 RelayRoom (通过 FFI 内部通道或 Localhost)
+    final isLoopback = isRelay && relayId == localPeerId;
+
+    if (isRelay && !isLoopback) return;
 
     if (!isRetry) {
       _connectionRetryCount = 0;
@@ -1415,7 +1435,9 @@ class AutoCoordinator {
               );
             }
           }
-          print('[P2P] Received remote stream from Relay');
+          print(
+            '[P2P] Received remote stream from Relay (Loopback: $isLoopback)',
+          );
         }
       };
 
@@ -1423,7 +1445,9 @@ class AutoCoordinator {
       _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) {
         print('[P2P] Connection state changed: $state for relay $relayId');
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-          print('[P2P] Remote stream connected! Ready to render.');
+          print(
+            '[P2P] Remote stream connected! Ready to render. (Loopback: $isLoopback)',
+          );
           _p2pConnected = true;
         } else if (state ==
                 RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
@@ -1449,8 +1473,32 @@ class AutoCoordinator {
 
       // 监听 ICE 候选
       _p2pConnection!.onIceCandidate = (RTCIceCandidate candidate) {
-        // 使用标准 JSON 格式发送候选
-        signaling.sendCandidate(roomId, relayId, jsonEncode(candidate.toMap()));
+        if (isLoopback) {
+          // Loopback 模式：直接通过 FFI 传递 ICE Candidate
+          final candidateJson = jsonEncode(candidate.toMap());
+          final roomIdPtr = toCString(roomId);
+          final peerIdPtr = toCString(localPeerId);
+          final jsonPtr = toCString(candidateJson);
+
+          try {
+            // 我们在这个连接里的角色是 "subscriber"，所以调用 RelayRoomAddICECandidate
+            // 让 RelayRoom 认为这是一个订阅者发来的 Candidate
+            // 注意：这里 PeerID 使用 localPeerId，这实际上是把 RelayHost 自己作为了一个 Subscriber
+            bindings.RelayRoomAddICECandidate(roomIdPtr, peerIdPtr, jsonPtr);
+            print('[Loopback] Sent ICE candidate via FFI');
+          } finally {
+            calloc.free(roomIdPtr);
+            calloc.free(peerIdPtr);
+            calloc.free(jsonPtr);
+          }
+        } else {
+          // 标准模式：通过信令发送候选
+          signaling.sendCandidate(
+            roomId,
+            relayId,
+            jsonEncode(candidate.toMap()),
+          );
+        }
       };
 
       // 创建 Offer
@@ -1462,9 +1510,48 @@ class AutoCoordinator {
       });
       await _p2pConnection!.setLocalDescription(offer);
 
-      // 发送 Offer 给 Relay
-      signaling.sendOffer(roomId, relayId, offer.sdp!);
-      print('[P2P] Sent offer to Relay: $relayId');
+      if (isLoopback) {
+        // Loopback Mode: Use FFI to exchange SDP
+        final roomIdPtr = toCString(roomId);
+        final peerIdPtr = toCString(localPeerId);
+        final offerPtr = toCString(offer.sdp!);
+
+        try {
+          print('[Loopback] Sending Offer via FFI...');
+          // 作为 Subscriber 添加自己，获取 Answer
+          final answerPtr = bindings.RelayRoomAddSubscriber(
+            roomIdPtr,
+            peerIdPtr,
+            offerPtr,
+          );
+          if (answerPtr != nullptr) {
+            final answerSdp = answerPtr.cast<Utf8>().toDartString();
+            calloc.free(answerPtr); // 释放 C 字符串内存
+
+            print(
+              '[Loopback] Received Answer via FFI, setting remote description...',
+            );
+            await _p2pConnection!.setRemoteDescription(
+              RTCSessionDescription(answerSdp, 'answer'),
+            );
+          } else {
+            print('[Loopback] Failed to add subscriber via FFI');
+            _errorController.add(
+              'Loopback connection failed: FFI returned null Answer',
+            );
+          }
+        } catch (e) {
+          print('[Loopback] FFI Error: $e');
+        } finally {
+          calloc.free(roomIdPtr);
+          calloc.free(peerIdPtr);
+          calloc.free(offerPtr);
+        }
+      } else {
+        // Standard Mode: Send Offer via Signaling
+        signaling.sendOffer(roomId, relayId, offer.sdp!);
+        print('[P2P] Sent offer to Relay: $relayId');
+      }
 
       // 设置超时重试定时器
       _connectionRetryTimer?.cancel();
@@ -1576,6 +1663,71 @@ class AutoCoordinator {
       await _p2pConnection!.addCandidate(candidate);
     } catch (e) {
       print('[P2P] Failed to add ICE candidate: $e');
+    }
+  }
+
+  // Loopback only: Handle ICE candidate received from Go RelayRoom via FFI callback
+  void _handleLoopbackCandidate(String candidateJson) {
+    if (!_p2pConnected && _p2pConnection == null) {
+      // P2P not ready yet
+      return;
+    }
+
+    try {
+      final data = jsonDecode(candidateJson);
+      final candidate = RTCIceCandidate(
+        data['candidate'],
+        data['sdpMid'],
+        data['sdpMLineIndex'],
+      );
+      _p2pConnection?.addCandidate(candidate);
+      print('[Loopback] Added ICE candidate from Relay');
+    } catch (e) {
+      print('[Loopback] Error adding candidate: $e');
+    }
+  }
+
+  // Loopback only: Handle Renegotiation Offer from Go RelayRoom
+  // This happens when Source switches (SFU <-> Local)
+  Future<void> _handleLoopbackRenegotiation(String offerJson) async {
+    try {
+      final data = jsonDecode(offerJson);
+      final sdp = data['sdp'];
+      if (sdp == null) return;
+
+      print('[Loopback] Handling renegotiation offer...');
+      await _p2pConnection?.setRemoteDescription(
+        RTCSessionDescription(sdp, 'offer'),
+      );
+
+      final answer = await _p2pConnection?.createAnswer();
+      if (answer == null) return;
+
+      await _p2pConnection?.setLocalDescription(answer);
+
+      // Send Answer back via FFI
+      final roomIdPtr = toCString(roomId);
+      final peerIdPtr = toCString(localPeerId);
+      final answerPtr = toCString(answer.sdp!);
+
+      try {
+        final result = bindings.RelayRoomHandleAnswer(
+          roomIdPtr,
+          peerIdPtr,
+          answerPtr,
+        );
+        if (result != 0) {
+          print('[Loopback] Failed to handle answer via FFI');
+        } else {
+          print('[Loopback] Renegotiation Answer sent via FFI');
+        }
+      } finally {
+        calloc.free(roomIdPtr);
+        calloc.free(peerIdPtr);
+        calloc.free(answerPtr);
+      }
+    } catch (e) {
+      print('[Loopback] Renegotiation error: $e');
     }
   }
 

@@ -86,6 +86,10 @@ type SourceSwitcher struct {
 	// 下游错误日志节流
 	lastWriteErrorTime int64 // UnixNano, atomic
 
+	// Consumer state (RelayRoom subscribers count)
+	consumerCount          int32
+	onConsumerStateChanged func(hasConsumers bool)
+
 	// 回调
 	onSourceChanged func(roomID string, sourceType SourceType, sharerID string)
 	onTrackChanged  func(videoTrack, audioTrack *webrtc.TrackLocalStaticRTP)

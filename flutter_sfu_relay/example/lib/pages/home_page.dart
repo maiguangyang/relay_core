@@ -569,14 +569,17 @@ class _HomePageState extends State<HomePage> {
         _lastConnectionType == ConnectionType.ethernet ||
         _lastConnectionType == ConnectionType.wifi;
 
-    // Relay 节点：需要订阅 SFU 来获取源视频
+    // Relay 节点 (Loopback):
+    // Relay Core (Shadow Connection) 负责从 SFU 拉流。
+    // Host UI (Main Connection) 通过 Loopback P2P 从本地 Core 获取流。
+    // 因此，Main Connection 应该取消订阅 SFU 以避免双重带宽消耗。
     if (isRelay) {
-      if (!pub.subscribed) {
-        pub.subscribe();
+      if (pub.subscribed) {
+        debugPrint(
+          '[VideoQuality] Relay Host (Loopback): unsubscribing SFU (consuming via Loopback)',
+        );
+        pub.unsubscribe();
       }
-      // Relay 使用最高画质
-      pub.setVideoQuality(lk.VideoQuality.HIGH);
-      // pub.setVideoFPS(60); // 移除强制 60fps，跟随源端帧率即可
       return;
     }
 
