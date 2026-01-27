@@ -43,7 +43,7 @@ class _HomePageState extends State<HomePage> {
   final _urlController = TextEditingController(
     // text: 'wss://frp.marlon.proton-system.com',
     // text: 'wss://oxygen-sl1zv95n.livekit.cloud',
-    text: 'ws://192.167.167.129:7880',
+    text: 'wss://live.kuonang.com',
   );
   final _tokenController = TextEditingController();
   // 影子连接专用：Bot Token (identity: "relay-bot", hidden: true, canSubscribe: true)
