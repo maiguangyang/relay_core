@@ -465,7 +465,7 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 	}
 
 	if ss.packetsFromSFU%100 == 0 {
-		// fmt.Printf("[Switcher] Wrote packet to track (isVideo: %v, fromSFU: %v)\n", isVideo, fromSFU)
+		utils.Info("[Switcher] Wrote packet to track (isVideo: %v, fromSFU: %v, sn: %d)", isVideo, fromSFU, packet.SequenceNumber)
 	}
 
 	// 更新统计

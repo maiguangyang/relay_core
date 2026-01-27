@@ -1178,6 +1178,13 @@ class AutoCoordinator {
   }
 
   void _handleSfuEvent(SfuEvent event) {
+    // Debug log for Loopback tracing
+    if (event.type == SfuEventType.iceCandidate && event.roomId == roomId) {
+      print(
+        '[SfuEvent] Received ICE event: peerId=${event.peerId}, localPeerId=$localPeerId, isRelay=${isRelay}',
+      );
+    }
+
     switch (event.type) {
       case SfuEventType.relayChanged:
         // Peer 离线检测：如果收到 relayChanged 且 data 表示离线
@@ -1473,6 +1480,9 @@ class AutoCoordinator {
 
       // 监听 ICE 候选
       _p2pConnection!.onIceCandidate = (RTCIceCandidate candidate) {
+        print(
+          '[ICE] Dart generated candidate: ${candidate.candidate}, isLoopback: $isLoopback',
+        );
         if (isLoopback) {
           // Loopback 模式：直接通过 FFI 传递 ICE Candidate
           final candidateJson = jsonEncode(candidate.toMap());
@@ -1481,11 +1491,14 @@ class AutoCoordinator {
           final jsonPtr = toCString(candidateJson);
 
           try {
+            print('[Loopback] Sending ICE candidate to Go via FFI...');
             // 我们在这个连接里的角色是 "subscriber"，所以调用 RelayRoomAddICECandidate
             // 让 RelayRoom 认为这是一个订阅者发来的 Candidate
             // 注意：这里 PeerID 使用 localPeerId，这实际上是把 RelayHost 自己作为了一个 Subscriber
             bindings.RelayRoomAddICECandidate(roomIdPtr, peerIdPtr, jsonPtr);
-            print('[Loopback] Sent ICE candidate via FFI');
+            print('[Loopback] Sent ICE candidate via FFI success');
+          } catch (e) {
+            print('[Loopback] Failed to send ICE candidate via FFI: $e');
           } finally {
             calloc.free(roomIdPtr);
             calloc.free(peerIdPtr);
