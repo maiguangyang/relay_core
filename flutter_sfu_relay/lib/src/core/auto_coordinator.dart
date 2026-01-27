@@ -1429,6 +1429,9 @@ class AutoCoordinator {
 
       // 监听远程流
       _p2pConnection!.onTrack = (RTCTrackEvent event) {
+        print(
+          '[P2P] onTrack event: ${event.track.kind}, id=${event.track.id}, streams=${event.streams.length}',
+        );
         if (event.streams.isNotEmpty) {
           _p2pRemoteStream = event.streams.first;
           if (!_disposed) {
@@ -1449,13 +1452,39 @@ class AutoCoordinator {
       };
 
       // 监听连接状态
-      _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) {
+      // 监听连接状态
+      _p2pConnection!.onConnectionState = (RTCPeerConnectionState state) async {
         print('[P2P] Connection state changed: $state for relay $relayId');
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
           print(
             '[P2P] Remote stream connected! Ready to render. (Loopback: $isLoopback)',
           );
           _p2pConnected = true;
+
+          // --- Comprehensive Debugging for Loopback ---
+          if (isLoopback) {
+            print('[Loopback] Running diagnostics...');
+            // Fix: transceivers is a Future<List<RTCRtpTransceiver>>
+            final transceivers = await _p2pConnection!.transceivers;
+            for (final t in transceivers) {
+              // Fix: direction is not a Future in flutter_webrtc typically,
+              // but if it is, wait. Otherwise remove await.
+              // Checking flutter_webrtc definition, it usually has getDirection async or property.
+              // Assuming property based on lint 'getter direction not defined'.
+              // It seems flutter_webrtc transceivers expose 'getDirection()' method via method channel usually?
+              // Or maybe we can just print the whole object.
+              // Let's print t.toString() to avoid property guessing errors.
+              print('[Loopback] Transceiver: $t, mid=${t.mid}');
+            }
+            // Fix: getReceivers returns Future<List<RTCRtpReceiver>>
+            final receivers = await _p2pConnection!.getReceivers();
+            for (final r in receivers) {
+              print(
+                '[Loopback] Receiver: id=${r.track?.id}, kind=${r.track?.kind}, enabled=${r.track?.enabled}',
+              );
+            }
+          }
+          // --------------------------------------------
         } else if (state ==
                 RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
             state ==
@@ -1531,6 +1560,8 @@ class AutoCoordinator {
 
         try {
           print('[Loopback] Sending Offer via FFI...');
+          print('[Loopback] Offer SDP: ${offer.sdp}');
+
           // 作为 Subscriber 添加自己，获取 Answer
           final answerPtr = bindings.RelayRoomAddSubscriber(
             roomIdPtr,
@@ -1539,6 +1570,8 @@ class AutoCoordinator {
           );
           if (answerPtr != nullptr) {
             final answerSdp = answerPtr.cast<Utf8>().toDartString();
+            print('[Loopback] Received Answer SDP: $answerSdp');
+
             calloc.free(answerPtr); // 释放 C 字符串内存
 
             print(
@@ -1601,7 +1634,14 @@ class AutoCoordinator {
       _p2pConnection = null;
     }
     // 关键修复：MediaStream 也需要 dispose() 释放音视频轨道
-    await _p2pRemoteStream?.dispose();
+    try {
+      if (_p2pRemoteStream != null) {
+        // 先检查是否还有 track，如果已经为空可能底层已释放
+        await _p2pRemoteStream!.dispose();
+      }
+    } catch (e) {
+      print('[P2P] Ignored error disposing remote stream: $e');
+    }
     _p2pRemoteStream = null;
     _p2pConnected = false;
     // 检查是否已销毁，避免向已关闭的 controller 添加事件
