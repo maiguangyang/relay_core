@@ -17,8 +17,6 @@ import "C"
 
 import (
 	"encoding/json"
-	"runtime"
-	"runtime/debug"
 	"sync"
 	"unsafe"
 
@@ -116,76 +114,6 @@ func SourceSwitcherInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer,
 	if err := ss.InjectSFUPacket(isVideo != 0, goData); err != nil {
 		return C.int(-1)
 	}
-	return C.int(0)
-}
-
-// SourceSwitcherInjectLocal 注入来自本地分享者的 RTP 包
-//
-//export SourceSwitcherInjectLocal
-func SourceSwitcherInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, dataLen C.int) C.int {
-	goRoomID := C.GoString(roomID)
-	ss := getSourceSwitcher(goRoomID)
-	if ss == nil {
-		return C.int(-1)
-	}
-
-	goData := C.GoBytes(data, dataLen)
-
-	if err := ss.InjectLocalPacket(isVideo != 0, goData); err != nil {
-		return C.int(-1)
-	}
-	return C.int(0)
-}
-
-// SourceSwitcherStartLocalShare 开始本地分享
-//
-//export SourceSwitcherStartLocalShare
-func SourceSwitcherStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
-	goRoomID := C.GoString(roomID)
-	goSharerID := C.GoString(sharerID)
-
-	ss := getSourceSwitcher(goRoomID)
-	if ss == nil {
-		return C.int(-1)
-	}
-
-	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
-	// 为了兼容性，如果不是 JSON 或解析失败，则当作普通 ID 处理
-	var id, codec string
-	if len(goSharerID) > 0 && goSharerID[0] == '{' {
-		var payload struct {
-			ID    string `json:"id"`
-			Codec string `json:"codec"`
-		}
-		if err := json.Unmarshal([]byte(goSharerID), &payload); err == nil {
-			id = payload.ID
-			codec = payload.Codec
-		}
-	}
-
-	if id == "" {
-		id = goSharerID
-	}
-
-	// 默认 isRelaySelf=true（Relay 自己分享的情况）
-	ss.StartLocalShare(id, codec, true)
-	utils.Info("Local share started: room=%s, sharer=%s, codec=%s", goRoomID, id, codec)
-	return C.int(0)
-}
-
-// SourceSwitcherStopLocalShare 停止本地分享
-//
-//export SourceSwitcherStopLocalShare
-func SourceSwitcherStopLocalShare(roomID *C.char) C.int {
-	goRoomID := C.GoString(roomID)
-
-	ss := getSourceSwitcher(goRoomID)
-	if ss == nil {
-		return C.int(-1)
-	}
-
-	ss.StopLocalShare()
-	utils.Info("Local share stopped: room=%s", goRoomID)
 	return C.int(0)
 }
 
@@ -625,8 +553,7 @@ func CoordinatorDisable(roomID *C.char) C.int {
 	}
 
 	// 清理关联的资源（避免内存泄漏）
-	sfu.DestroyBridge(goRoomID)           // 清理 LiveKitBridge
-	sfu.DestroyLocalShareBridge(goRoomID) // 清理 LocalShareBridge
+	sfu.DestroyBridge(goRoomID) // 清理 LiveKitBridge
 
 	utils.Info("Coordinator disabled: room=%s", goRoomID)
 	return C.int(0)
@@ -772,112 +699,6 @@ func CoordinatorInjectSFU(roomID *C.char, isVideo C.int, data unsafe.Pointer, da
 	}
 
 	packetPool.Put(buf)
-	return C.int(0)
-}
-
-// CoordinatorInjectLocal 注入本地分享 RTP 包
-//
-//export CoordinatorInjectLocal
-func CoordinatorInjectLocal(roomID *C.char, isVideo C.int, data unsafe.Pointer, dataLen C.int) C.int {
-	goRoomID := C.GoString(roomID)
-
-	v, ok := coordinators.Load(goRoomID)
-	if !ok {
-		return C.int(-1)
-	}
-
-	pmc := v.(*sfu.ProxyModeCoordinator)
-
-	// 优化：使用 sync.Pool 复用内存
-	length := int(dataLen)
-	buf := packetPool.Get().([]byte)
-	if cap(buf) < length {
-		buf = make([]byte, length)
-	} else {
-		buf = buf[:length]
-	}
-
-	srcSlice := unsafe.Slice((*byte)(data), length)
-	copy(buf, srcSlice)
-
-	if err := pmc.InjectLocalPacket(isVideo != 0, buf); err != nil {
-		packetPool.Put(buf)
-		return C.int(-1)
-	}
-
-	packetPool.Put(buf)
-	return C.int(0)
-}
-
-// CoordinatorStartLocalShare 开始本地分享
-//
-//export CoordinatorStartLocalShare
-func CoordinatorStartLocalShare(roomID *C.char, sharerID *C.char) C.int {
-	goRoomID := C.GoString(roomID)
-	goSharerID := C.GoString(sharerID)
-
-	v, ok := coordinators.Load(goRoomID)
-	if !ok {
-		return C.int(-1)
-	}
-
-	pmc := v.(*sfu.ProxyModeCoordinator)
-
-	// 尝试解析 JSON (格式: {"id":"user1", "codec":"vp9"})
-	var id, codec string
-	if len(goSharerID) > 0 && goSharerID[0] == '{' {
-		var payload struct {
-			ID    string `json:"id"`
-			Codec string `json:"codec"`
-		}
-		if err := json.Unmarshal([]byte(goSharerID), &payload); err == nil {
-			id = payload.ID
-			codec = payload.Codec
-		}
-	}
-
-	if id == "" {
-		id = goSharerID
-	}
-
-	// Coordinator 自己在分享，保持 SFU 路径
-	pmc.StartLocalShare(id, codec, true)
-
-	return C.int(0)
-}
-
-// CoordinatorStopLocalShare 停止本地分享
-//
-//export CoordinatorStopLocalShare
-func CoordinatorStopLocalShare(roomID *C.char) C.int {
-	goRoomID := C.GoString(roomID)
-
-	v, ok := coordinators.Load(goRoomID)
-	if !ok {
-		return C.int(-1)
-	}
-
-	pmc := v.(*sfu.ProxyModeCoordinator)
-	pmc.StopLocalShare()
-
-	// 强制执行 GC 并将内存归还给操作系统
-	// 解决用户报告的内存泄漏问题（Go 惰性 GC 导致 RSS 虚高）
-	debug.FreeOSMemory()
-
-	// 打印详细的内存统计信息，帮助定位泄漏源头
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	utils.Info("[MemStats] After FreeOSMemory: Alloc=%v MiB, TotalAlloc=%v MiB, Sys=%v MiB, NumGC=%v, HeapObjects=%v, HeapInUse=%v MiB, HeapIdle=%v MiB",
-		m.Alloc/1024/1024,
-		m.TotalAlloc/1024/1024,
-		m.Sys/1024/1024,
-		m.NumGC,
-		m.Mallocs-m.Frees,
-		m.HeapInuse/1024/1024,
-		m.HeapIdle/1024/1024,
-	)
-	utils.Info("CoordinatorStopLocalShare: invoked FreeOSMemory")
-
 	return C.int(0)
 }
 

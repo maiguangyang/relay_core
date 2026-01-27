@@ -598,6 +598,33 @@ class FlutterSfuRelayBindings {
         int Function(ffi.Pointer<ffi.Char>)
       >();
 
+  /// LocalShareConnect 建立本地分享 Loopback 连接
+  /// 接收 Offer SDP，返回 Answer SDP
+  /// 返回: Answer SDP 字符串 (需要 FreeString), 或者 NULL (失败)
+  ffi.Pointer<ffi.Char> LocalShareConnect(
+    ffi.Pointer<ffi.Char> roomID,
+    ffi.Pointer<ffi.Char> offerSdp,
+  ) {
+    return _LocalShareConnect(roomID, offerSdp);
+  }
+
+  late final _LocalShareConnectPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<ffi.Char> Function(
+            ffi.Pointer<ffi.Char>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('LocalShareConnect');
+  late final _LocalShareConnect =
+      _LocalShareConnectPtr.asFunction<
+        ffi.Pointer<ffi.Char> Function(
+          ffi.Pointer<ffi.Char>,
+          ffi.Pointer<ffi.Char>,
+        )
+      >();
+
   /// LocalShareBridgeCreate 创建本地分享桥接器
   /// 返回: 0 成功, -1 失败
   int LocalShareBridgeCreate(ffi.Pointer<ffi.Char> roomID) {

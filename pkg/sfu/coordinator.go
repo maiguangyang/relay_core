@@ -387,22 +387,6 @@ func (pmc *ProxyModeCoordinator) InjectSFUPacket(isVideo bool, data []byte) erro
 	return pmc.switcher.InjectSFUPacket(isVideo, data)
 }
 
-// InjectLocalPacket 注入本地分享 RTP 包
-func (pmc *ProxyModeCoordinator) InjectLocalPacket(isVideo bool, data []byte) error {
-	return pmc.switcher.InjectLocalPacket(isVideo, data)
-}
-
-// StartLocalShare 开始本地分享
-// isRelaySelf: 如果 Relay 自己在分享，设为 true（保持 SFU 路径）
-func (pmc *ProxyModeCoordinator) StartLocalShare(sharerID string, codecType string, isRelaySelf bool) {
-	pmc.switcher.StartLocalShare(sharerID, codecType, isRelaySelf)
-}
-
-// StopLocalShare 停止本地分享
-func (pmc *ProxyModeCoordinator) StopLocalShare() {
-	pmc.switcher.StopLocalShare()
-}
-
 // SetOnEvent 设置事件回调
 func (pmc *ProxyModeCoordinator) SetOnEvent(fn func(event CoordinatorEvent)) {
 	pmc.mu.Lock()

@@ -10,7 +10,7 @@
 package sfu
 
 import (
-	"runtime/debug"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -313,6 +313,45 @@ func (ss *SourceSwitcher) SetAudioCodec(codec webrtc.RTPCodecCapability) error {
 	return nil
 }
 
+// StartLocalShare 切换到本地分享源
+func (ss *SourceSwitcher) StartLocalShare(sharerID string, _ string, _ bool) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	ss.activeSource.Store(int32(SourceTypeLocal))
+	ss.localSharerID = sharerID
+	ss.localActive = true
+
+	// Reset synchronization state for new stream
+	ss.videoSynced = false
+	ss.videoReset = false
+	ss.audioSynced = false
+	ss.audioReset = false
+
+	if ss.onSourceChanged != nil {
+		go ss.onSourceChanged(ss.roomID, SourceTypeLocal, sharerID)
+	}
+}
+
+// StopLocalShare 切换回 SFU 源
+func (ss *SourceSwitcher) StopLocalShare() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	ss.activeSource.Store(int32(SourceTypeSFU))
+	ss.localSharerID = ""
+
+	// Reset synchronization state when switching back
+	ss.videoSynced = false
+	ss.videoReset = false
+	ss.audioSynced = false
+	ss.audioReset = false
+
+	if ss.onSourceChanged != nil {
+		go ss.onSourceChanged(ss.roomID, SourceTypeSFU, "")
+	}
+}
+
 // GetActiveSource 返回当前活跃的源类型
 func (ss *SourceSwitcher) GetActiveSource() SourceType {
 	return SourceType(ss.activeSource.Load())
@@ -342,25 +381,6 @@ func (ss *SourceSwitcher) InjectSFUPacket(isVideo bool, data []byte) error {
 	}
 
 	return ss.writePacket(isVideo, data, true)
-}
-
-// InjectLocalPacket 注入来自本地分享者的 RTP 包
-// 当活跃源是 Local 时，数据会被转发给订阅者
-func (ss *SourceSwitcher) InjectLocalPacket(isVideo bool, data []byte) error {
-	ss.mu.RLock()
-	if ss.closed {
-		ss.mu.RUnlock()
-		return ErrForwarderClosed
-	}
-	ss.localActive = true
-	ss.mu.RUnlock()
-
-	// 只有当活跃源是 Local 时才转发
-	if ss.GetActiveSource() != SourceTypeLocal {
-		return nil
-	}
-
-	return ss.writePacket(isVideo, data, false)
 }
 
 // writePacket 写入 RTP 包到对应的 Track
@@ -474,119 +494,6 @@ func (ss *SourceSwitcher) writePacket(isVideo bool, data []byte, fromSFU bool) e
 	return nil
 }
 
-// StartLocalShare 开始本地分享（切换到 Local 源）
-// isRelaySelf: 如果 true，表示 Relay 自己在分享屏幕（SFU 路径继续使用）
-//
-//	如果 false，表示远端设备在分享（LocalShareBridge UDP 路径）
-func (ss *SourceSwitcher) StartLocalShare(sharerID string, codecType string, isRelaySelf bool) {
-	ss.mu.Lock()
-	ss.localSharerID = sharerID
-	ss.mu.Unlock()
-
-	// 尝试应用 Codec (如果有指定)
-	if codecType != "" {
-		var mimeType string
-		switch codecType {
-		case "vp8":
-			mimeType = webrtc.MimeTypeVP8
-		case "vp9":
-			mimeType = webrtc.MimeTypeVP9
-		case "h264":
-			mimeType = webrtc.MimeTypeH264
-		case "av1":
-			mimeType = webrtc.MimeTypeAV1
-		default:
-			// 尝试模糊匹配或直接使用
-			// 例如传入 video/VP9
-			mimeType = codecType
-		}
-
-		// 对于 H264/VP9，通常不需要具体的 sdpFmtpLine 进行简单的 Relay
-		// 但如果需要支持 Profile level id，可能需要更复杂的解析
-		// 目前简单映射 MimeType 即可，WebRTC 协商会自动处理 payload type
-		utils.Info("[Switcher] StartLocalShare requesting codec: %s", mimeType)
-		if err := ss.SetVideoCodec(webrtc.RTPCodecCapability{MimeType: mimeType}); err != nil {
-			utils.Error("[Switcher] Failed to set video codec: %v", err)
-		}
-	}
-
-	// 关键逻辑：
-	// 如果 Relay 自己在分享屏幕，数据流是：
-	//   本地屏幕 -> LiveKit -> SFU -> Shadow Connection -> InjectSFUPacket()
-	// 所以应该保持 SFU 源活跃，不切换到 Local
-	//
-	// 如果远端设备在分享，数据流是：
-	//   远端设备 -> LocalShareBridge UDP -> InjectLocalPacket()
-	// 这时需要切换到 Local 源
-	if isRelaySelf {
-		utils.Info("[Switcher] Relay is screen sharer, keeping SFU source active (path: LiveKit->SFU->Bridge->InjectSFU)")
-		// 不切换 activeSource，保持 SFU 路径
-		ss.mu.Lock()
-		ss.localActive = true // 标记本地分享活跃（用于状态显示）
-		ss.mu.Unlock()
-	} else {
-		utils.Info("[Switcher] Remote device is screen sharer, switching to Local source (path: LocalShareBridge UDP)")
-		// 原子切换源到 Local
-		ss.activeSource.Store(int32(SourceTypeLocal))
-	}
-
-	// 触发回调
-	ss.mu.RLock()
-	fn := ss.onSourceChanged
-	ss.mu.RUnlock()
-	if fn != nil {
-		fn(ss.roomID, SourceTypeLocal, sharerID)
-	}
-}
-
-// StopLocalShare 停止本地分享（切换回 SFU 源）
-func (ss *SourceSwitcher) StopLocalShare() {
-	ss.mu.Lock()
-	sharerID := ss.localSharerID
-	ss.localSharerID = ""
-	ss.localActive = false
-	ss.mu.Unlock()
-
-	// 原子切换源
-	ss.activeSource.Store(int32(SourceTypeSFU))
-
-	// 触发回调
-	ss.mu.RLock()
-	fn := ss.onSourceChanged
-	ss.mu.RUnlock()
-	if fn != nil {
-		fn(ss.roomID, SourceTypeSFU, sharerID)
-	}
-
-	// 强制执行 GC 并将内存归还给操作系统
-	// 解决用户报告的内存泄漏问题（Go 惰性 GC 导致 RSS 虚高）
-	utils.Info("[Switcher] Local share stopped, invoking FreeOSMemory")
-	go func() {
-		// 稍微延迟一下，确保之前的引用都断开
-		time.Sleep(100 * time.Millisecond)
-		debug.FreeOSMemory()
-	}()
-}
-
-// SwitchToSource 手动切换到指定源
-func (ss *SourceSwitcher) SwitchToSource(sourceType SourceType) {
-	oldSource := ss.GetActiveSource()
-	if oldSource == sourceType {
-		return
-	}
-
-	ss.activeSource.Store(int32(sourceType))
-
-	// 触发回调
-	ss.mu.RLock()
-	fn := ss.onSourceChanged
-	sharerID := ss.localSharerID
-	ss.mu.RUnlock()
-	if fn != nil {
-		fn(ss.roomID, sourceType, sharerID)
-	}
-}
-
 // IsLocalSharing 返回是否正在本地分享
 func (ss *SourceSwitcher) IsLocalSharing() bool {
 	return ss.GetActiveSource() == SourceTypeLocal
@@ -638,4 +545,50 @@ func (ss *SourceSwitcher) HealthCheck(timeout time.Duration) bool {
 		return ss.sfuActive
 	}
 	return ss.localActive
+}
+
+// InjectRemoteTrack 注入来自远端 Track (Go Loopback PC) 的 RTP 包
+func (ss *SourceSwitcher) InjectRemoteTrack(isVideo bool, track *webrtc.TrackRemote) error {
+	ss.mu.RLock()
+	if ss.closed {
+		ss.mu.RUnlock()
+		return ErrForwarderClosed
+	}
+	ss.localActive = true
+	ss.mu.RUnlock()
+
+	// 循环读取 RTP 包
+	buf := make([]byte, 1500)
+	for {
+		n, _, err := track.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+
+		// 只有当活跃源是 Local 时才转发
+		// 但我们还是需要持续 Read 以防 buffer 满？
+		// 是的，必须消费。
+		if ss.GetActiveSource() != SourceTypeLocal {
+			continue
+		}
+
+		// 复制数据 (因为 writePacket 可能会异步或者 buf 被复用)
+		// 但 writePacket 内部是 Unmarshal，如果直接处理可以不用 copy？
+		// writePacket 内部不仅 Unmarshal，还会 WriteRTP。Pion 的 WriteRTP 可能会引用 payload。
+		// 为了安全，最好 copy，或者直接传 buf[:n] 的 slice 如果下游能保证安全。
+		// writePacket 调用 Packet.Unmarshal，它会 copy 吗？
+		// Pion Packet.Unmarshal(buf) 如果 buf 变了 packet 会坏吗？是的，Payload 是 slice。
+		// 所以必须 copy 或者保证 buf 在 writePacket 返回前不被覆盖。
+		// 在这里，下次 Read 在下一次循环，writePacket 是同步调用的吗？
+		// writePacket 是同步的。
+		// 所以可以直接传 buf[:n]！
+		//
+		// 注意：InjectLocalPacket 是将 UDP 包透传。
+		if err := ss.writePacket(isVideo, buf[:n], false); err != nil {
+			// logging is throttled inside writePacket
+		}
+	}
 }

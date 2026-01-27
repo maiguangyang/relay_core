@@ -132,28 +132,6 @@ func TestCoordinatorReceiveClaim(t *testing.T) {
 	}
 }
 
-func TestCoordinatorLocalShare(t *testing.T) {
-	config := DefaultCoordinatorConfig()
-	pmc, err := NewProxyModeCoordinator("test-room", "local-peer", config)
-	if err != nil {
-		t.Fatalf("Failed to create coordinator: %v", err)
-	}
-	defer pmc.Close()
-	// 开始本地分享
-	pmc.StartLocalShare("local-peer", "", false)
-
-	switcher := pmc.GetSourceSwitcher()
-	if !switcher.IsLocalSharing() {
-		t.Error("Should be local sharing")
-	}
-
-	pmc.StopLocalShare()
-
-	if switcher.IsLocalSharing() {
-		t.Error("Should not be local sharing after stop")
-	}
-}
-
 func TestCoordinatorUpdateLocalDeviceInfo(t *testing.T) {
 	config := DefaultCoordinatorConfig()
 	pmc, err := NewProxyModeCoordinator("test-room", "local-peer", config)

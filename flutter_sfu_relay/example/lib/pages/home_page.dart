@@ -51,7 +51,7 @@ class _HomePageState extends State<HomePage> {
     // 测试用写死的 Bot Token
     text:
         // 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTkxMTc5MzcsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NzU4MTkzNywic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.pj328J32dm8ota1xlirBaTs8B_BIIpiopN68BGMjYxk',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzAzMzkwMzAsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoibWFybG9uIiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2OTQ3NTAzMCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6Im9mZmljZS10ZXN0LTk5OCIsInJvb21Kb2luIjp0cnVlfX0.UO6nwgWbK56L2RiRlXnbf8IlTQO1CzNSh5UusAVaZPk',
   );
 
   // 页面状态
@@ -104,9 +104,11 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<String>? _peerLeftSubscription;
   StreamSubscription<String?>? _screenShareSubscription;
 
-  // LocalShareBridge - 零 FFI 本地分享桥接器
-  // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
-  LocalShareBridge? _localShareBridge;
+  // LocalLoopbackPeer - WebRTC Loopback 本地分享
+  // 建立 Dart <-> Go 的 PeerConnection，通过 FFI 交换 SDP
+  LocalLoopbackPeer? _loopbackPeer;
+  // 存储 loopback 使用的辅助流
+  MediaStream? _loopbackStream;
 
   // 本地屏幕共享 Track (桌面平台手动创建，需要手动释放)
   lk.LocalVideoTrack? _localScreenShareTrack;
@@ -787,11 +789,19 @@ class _HomePageState extends State<HomePage> {
           }
           _localScreenShareTrack = null;
         }
-        // 清理 LocalShareBridge
-        if (_localShareBridge != null) {
-          await _localShareBridge!.destroy();
-          debugPrint('[LocalShareBridge] Destroyed on disconnect');
-          _localShareBridge = null;
+        // 清理 LocalLoopbackPeer
+        if (_loopbackPeer != null) {
+          try {
+            await _loopbackPeer!.dispose();
+            debugPrint('[LoopbackPeer] Disposed on disconnect');
+          } catch (e) {
+            debugPrint('[LoopbackPeer] Error disposing: $e');
+          }
+          _loopbackPeer = null;
+        }
+        if (_loopbackStream != null) {
+          await _loopbackStream!.dispose();
+          _loopbackStream = null;
         }
       } catch (e) {
         debugPrint('Error stopping local screen share: $e');
@@ -910,16 +920,18 @@ class _HomePageState extends State<HomePage> {
       _localScreenShareTrack = null;
     }
 
-    if (_localShareBridge != null) {
+    if (_loopbackPeer != null) {
       try {
-        debugPrint('[Cleanup] Destroying Local Share Bridge...');
-        await _localShareBridge!.destroy();
-        debugPrint('[Cleanup] Local Share Bridge destroyed');
+        debugPrint('[Cleanup] Disposing Loopback Peer...');
+        await _loopbackPeer!.dispose();
+        debugPrint('[Cleanup] Loopback Peer disposed');
       } catch (e) {
-        debugPrint('[Cleanup] Error destroying share bridge: $e');
+        debugPrint('[Cleanup] Error disposing loopback peer: $e');
       }
-      _localShareBridge = null;
+      _loopbackPeer = null;
     }
+    await _loopbackStream?.dispose();
+    _loopbackStream = null;
 
     // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
     await Future.delayed(const Duration(milliseconds: 2000));
@@ -1234,33 +1246,41 @@ class _HomePageState extends State<HomePage> {
 
       // 通知 AutoCoordinator 屏幕共享状态变化
       if (newState) {
-        // 🚀 使用 LocalShareBridge 优化：零 FFI 本地分享
-        // 创建并启动 UDP 桥接器，RTP 包通过 UDP 发送到 Go 层
+        // 🚀 使用 LocalLoopbackPeer 优化：WebRTC Loopback
+        // 建立 Dart -> Go 的 PCC 连接，直接传输 MediaStreamTrack
         try {
           final roomId = _room?.name ?? 'room';
-          _localShareBridge = LocalShareBridge(roomId: roomId);
-          final port = await _localShareBridge!.start();
-          debugPrint(
-            '[LocalShareBridge] Started on port $port for room: $roomId',
-          );
-          debugPrint(
-            '[LocalShareBridge] RTP packets will be sent via UDP (zero FFI!)',
-          );
+          _loopbackPeer = LocalLoopbackPeer(roomId);
+
+          // 创建辅助流用于 Loopback
+          _loopbackStream = await createLocalMediaStream('loopback_stream');
+          if (_localScreenShareTrack != null) {
+            // 必须从 LiveKit Track 获取底层的 MediaStreamTrack
+            // LiveKit LocalVideoTrack.mediaStreamTrack 是底层 track
+            _loopbackStream!.addTrack(_localScreenShareTrack!.mediaStreamTrack);
+
+            await _loopbackPeer!.start(_loopbackStream!);
+            debugPrint('[LoopbackPeer] Started for room: $roomId');
+          } else {
+            debugPrint('[LoopbackPeer] Warning: No local screen track found');
+          }
         } catch (e) {
-          debugPrint(
-            '[LocalShareBridge] Failed to start: $e, falling back to FFI path',
-          );
-          _localShareBridge = null;
+          debugPrint('[LoopbackPeer] Failed to start: $e');
+          // cleanup
+          await _loopbackPeer?.dispose();
+          _loopbackPeer = null;
         }
 
         _autoCoord?.notifyScreenShareStarted(codec: selectedCodec);
       } else {
-        // 停止 LocalShareBridge
-        if (_localShareBridge != null) {
-          await _localShareBridge!.destroy();
-          debugPrint('[LocalShareBridge] Stopped and destroyed');
-          _localShareBridge = null;
+        // 停止 LoopbackPeer
+        if (_loopbackPeer != null) {
+          await _loopbackPeer!.dispose();
+          debugPrint('[LoopbackPeer] Stopped and disposed');
+          _loopbackPeer = null;
         }
+        await _loopbackStream?.dispose();
+        _loopbackStream = null;
 
         _autoCoord?.notifyScreenShareStopped();
       }
@@ -1269,6 +1289,7 @@ class _HomePageState extends State<HomePage> {
         _controlState = _controlState.copyWith(screenShareEnabled: newState);
       });
     } catch (e) {
+      debugPrint('[ScreenShare] Failed to toggle screen share: $e');
       _scaffoldMessengerKey.currentState?.showSnackBar(
         SnackBar(content: Text('屏幕共享失败: $e')),
       );

@@ -331,41 +331,11 @@ extern __declspec(dllexport) char* LiveKitBridgeGetStatus(char* roomID);
 //
 extern __declspec(dllexport) int LiveKitBridgeIsConnected(char* roomID);
 
-// LocalShareBridgeCreate 创建本地分享桥接器
-// 返回: 0 成功, -1 失败
+// LocalShareConnect 建立本地分享 Loopback 连接
+// 接收 Offer SDP，返回 Answer SDP
+// 返回: Answer SDP 字符串 (需要 FreeString), 或者 NULL (失败)
 //
-extern __declspec(dllexport) int LocalShareBridgeCreate(char* roomID);
-
-// LocalShareBridgeStart 启动桥接器并开始监听 UDP
-// preferredPort: 首选端口，0 表示自动分配
-// 返回: 实际监听端口 (成功), -1 (失败)
-//
-extern __declspec(dllexport) int LocalShareBridgeStart(char* roomID, int preferredPort);
-
-// LocalShareBridgeStop 停止桥接器
-// 返回: 0 成功, -1 失败
-//
-extern __declspec(dllexport) int LocalShareBridgeStop(char* roomID);
-
-// LocalShareBridgeDestroy 销毁桥接器
-// 返回: 0 成功
-//
-extern __declspec(dllexport) int LocalShareBridgeDestroy(char* roomID);
-
-// LocalShareBridgeGetPort 获取监听端口
-// 返回: 端口号 (成功), -1 (未启动)
-//
-extern __declspec(dllexport) int LocalShareBridgeGetPort(char* roomID);
-
-// LocalShareBridgeIsRunning 检查是否正在运行
-// 返回: 1 运行中, 0 未运行
-//
-extern __declspec(dllexport) int LocalShareBridgeIsRunning(char* roomID);
-
-// LocalShareBridgeGetStatus 获取桥接器状态
-// 返回: JSON 字符串，需要调用 FreeString 释放
-//
-extern __declspec(dllexport) char* LocalShareBridgeGetStatus(char* roomID);
+extern __declspec(dllexport) char* LocalShareConnect(char* roomID, char* offerSdp);
 extern __declspec(dllexport) int ElectionEnable(int64_t relayID, char* roomID);
 extern __declspec(dllexport) int ElectionDisable(int64_t relayID, char* roomID);
 extern __declspec(dllexport) int ElectionUpdateCandidate(int64_t relayID, char* roomID, char* peerID, int64_t bandwidth, int64_t latency, double packetLoss);
@@ -392,18 +362,6 @@ extern __declspec(dllexport) int SourceSwitcherDestroy(char* roomID);
 // dataLen: 数据长度
 //
 extern __declspec(dllexport) int SourceSwitcherInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
-
-// SourceSwitcherInjectLocal 注入来自本地分享者的 RTP 包
-//
-extern __declspec(dllexport) int SourceSwitcherInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
-
-// SourceSwitcherStartLocalShare 开始本地分享
-//
-extern __declspec(dllexport) int SourceSwitcherStartLocalShare(char* roomID, char* sharerID);
-
-// SourceSwitcherStopLocalShare 停止本地分享
-//
-extern __declspec(dllexport) int SourceSwitcherStopLocalShare(char* roomID);
 
 // SourceSwitcherGetStatus 获取源切换器状态
 //
@@ -507,18 +465,6 @@ extern __declspec(dllexport) int CoordinatorUpdateLocalDevice(char* roomID, int 
 //
 extern __declspec(dllexport) int CoordinatorInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
 
-// CoordinatorInjectLocal 注入本地分享 RTP 包
-//
-extern __declspec(dllexport) int CoordinatorInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
-
-// CoordinatorStartLocalShare 开始本地分享
-//
-extern __declspec(dllexport) int CoordinatorStartLocalShare(char* roomID, char* sharerID);
-
-// CoordinatorStopLocalShare 停止本地分享
-//
-extern __declspec(dllexport) int CoordinatorStopLocalShare(char* roomID);
-
 // CoordinatorGetStatus 获取协调器状态
 //
 extern __declspec(dllexport) char* CoordinatorGetStatus(char* roomID);
@@ -586,18 +532,6 @@ extern __declspec(dllexport) char* RelayRoomGetStatus(char* roomID);
 // RelayRoomInjectSFU 注入 SFU RTP 包（通过 RelayRoom）
 //
 extern __declspec(dllexport) int RelayRoomInjectSFU(char* roomID, int isVideo, void* data, int dataLen);
-
-// RelayRoomInjectLocal 注入本地分享 RTP 包（通过 RelayRoom）
-//
-extern __declspec(dllexport) int RelayRoomInjectLocal(char* roomID, int isVideo, void* data, int dataLen);
-
-// RelayRoomStartLocalShare 开始本地分享
-//
-extern __declspec(dllexport) int RelayRoomStartLocalShare(char* roomID, char* sharerID);
-
-// RelayRoomStopLocalShare 停止本地分享
-//
-extern __declspec(dllexport) int RelayRoomStopLocalShare(char* roomID);
 
 // BufferPoolGetStats 获取全局缓冲池统计
 //

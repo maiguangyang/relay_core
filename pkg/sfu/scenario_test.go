@@ -214,63 +214,6 @@ func testMultiSubscriber(t *testing.T, subscriberCount int) {
 // 测量在流转发过程中切换源的延迟和中断时间
 // ==========================================
 
-func TestScenario_SourceSwitchLatency(t *testing.T) {
-	const (
-		testRounds = 100 // 测试 100 次切换
-	)
-
-	switcher, err := NewSourceSwitcher("switch-test-room")
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
-	defer switcher.Close()
-
-	var (
-		totalSwitchTime int64
-		maxSwitchTime   int64
-		minSwitchTime   int64 = int64(time.Hour)
-	)
-
-	// 记录切换时间
-	switchDone := make(chan time.Duration, 1)
-	switcher.SetOnSourceChanged(func(roomID string, source SourceType, sharerID string) {
-		// 回调触发时记录
-	})
-
-	for i := 0; i < testRounds; i++ {
-		// 切换到 Local
-		startSwitch := time.Now()
-		switcher.StartLocalShare(fmt.Sprintf("sharer-%d", i), "", false)
-		switchLatency := time.Since(startSwitch)
-
-		atomic.AddInt64(&totalSwitchTime, switchLatency.Nanoseconds())
-		if switchLatency.Nanoseconds() > atomic.LoadInt64(&maxSwitchTime) {
-			atomic.StoreInt64(&maxSwitchTime, switchLatency.Nanoseconds())
-		}
-		if switchLatency.Nanoseconds() < atomic.LoadInt64(&minSwitchTime) {
-			atomic.StoreInt64(&minSwitchTime, switchLatency.Nanoseconds())
-		}
-
-		// 切换回 SFU
-		switcher.StopLocalShare()
-	}
-
-	close(switchDone)
-
-	avgSwitch := time.Duration(atomic.LoadInt64(&totalSwitchTime) / int64(testRounds))
-
-	t.Logf("=== 源切换延迟测试 ===")
-	t.Logf("测试次数: %d", testRounds)
-	t.Logf("平均切换延迟: %v", avgSwitch)
-	t.Logf("最小切换延迟: %v", time.Duration(atomic.LoadInt64(&minSwitchTime)))
-	t.Logf("最大切换延迟: %v", time.Duration(atomic.LoadInt64(&maxSwitchTime)))
-
-	// 断言切换延迟应该非常快（< 1ms）
-	if avgSwitch > time.Millisecond {
-		t.Errorf("平均切换延迟过高: %v (期望 < 1ms)", avgSwitch)
-	}
-}
-
 // ==========================================
 // 场景 4: 高频包转发压力测试
 // 测试极限吞吐量

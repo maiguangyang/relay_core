@@ -136,52 +136,6 @@ func TestIntegration_FailoverScenario(t *testing.T) {
 }
 
 // ==========================================
-// 场景：完整数据流测试
-// ==========================================
-
-func TestIntegration_DataFlowScenario(t *testing.T) {
-	// 创建 SourceSwitcher
-	switcher, err := NewSourceSwitcher("test-room")
-	if err != nil {
-		t.Fatalf("Failed to create switcher: %v", err)
-	}
-	defer switcher.Close()
-
-	var sourceChanges int32
-	switcher.SetOnSourceChanged(func(roomID string, sourceType SourceType, sharerID string) {
-		atomic.AddInt32(&sourceChanges, 1)
-		t.Logf("Source changed to: %s", sourceType)
-	})
-
-	// 注入 SFU 数据
-	for i := 0; i < 100; i++ {
-		packet := createTestRTPPacket(uint16(i), 1200)
-		switcher.InjectSFUPacket(true, packet)
-	}
-
-	// 模拟开始本地分享
-	switcher.StartLocalShare("sharer-1", "", false)
-
-	// 注入本地数据
-	for i := 0; i < 50; i++ {
-		packet := createTestRTPPacket(uint16(i), 1200)
-		switcher.InjectLocalPacket(true, packet)
-	}
-
-	// 切换回 SFU
-	switcher.StopLocalShare()
-
-	time.Sleep(50 * time.Millisecond)
-
-	if atomic.LoadInt32(&sourceChanges) < 2 {
-		t.Errorf("Expected at least 2 source changes, got %d", atomic.LoadInt32(&sourceChanges))
-	}
-
-	status := switcher.GetStatus()
-	t.Logf("Final status: %+v", status)
-}
-
-// ==========================================
 // 场景：网络质量变化
 // ==========================================
 

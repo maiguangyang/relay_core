@@ -110,27 +110,6 @@ class Coordinator {
     return result == 0;
   }
 
-  /// 开始本地分享
-  bool startLocalShare(String sharerId) {
-    final roomPtr = toCString(roomId);
-    final sharerPtr = toCString(sharerId);
-    try {
-      final result = bindings.CoordinatorStartLocalShare(roomPtr, sharerPtr);
-      return result == 0;
-    } finally {
-      calloc.free(roomPtr);
-      calloc.free(sharerPtr);
-    }
-  }
-
-  /// 停止本地分享
-  bool stopLocalShare() {
-    final roomPtr = toCString(roomId);
-    final result = bindings.CoordinatorStopLocalShare(roomPtr);
-    calloc.free(roomPtr);
-    return result == 0;
-  }
-
   /// 注入 SFU RTP 包
   bool injectSfuPacket(bool isVideo, Uint8List data) {
     final roomPtr = toCString(roomId);

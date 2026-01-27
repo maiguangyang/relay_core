@@ -169,24 +169,6 @@ class RelayRoom {
     }
   }
 
-  /// 开始本地分享
-  Future<void> startSharing() async {
-    if (_state != RoomState.connected) {
-      throw StateError('Must be connected to start sharing');
-    }
-
-    _coordinator.startLocalShare(localPeerId);
-    _updateState(RoomState.sharing);
-  }
-
-  /// 停止本地分享
-  Future<void> stopSharing() async {
-    if (_state != RoomState.sharing) return;
-
-    _coordinator.stopLocalShare();
-    _updateState(RoomState.connected);
-  }
-
   /// 获取综合状态
   Map<String, dynamic> getStatus() => _coordinator.getStatus();
 

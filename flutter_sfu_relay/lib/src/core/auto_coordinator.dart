@@ -457,22 +457,6 @@ class AutoCoordinator {
     return _coordinator.injectLocalPacket(isVideo, data as dynamic);
   }
 
-  /// 开始本地分享
-  bool startLocalShare({String? codec}) {
-    String param = localPeerId;
-    if (codec != null && codec.isNotEmpty) {
-      // 构造 JSON 参数传递给 FFI
-      // {"id": "peerId", "codec": "vp9"}
-      param = jsonEncode({'id': localPeerId, 'codec': codec});
-    }
-    return _coordinator.startLocalShare(param);
-  }
-
-  /// 停止本地分享
-  bool stopLocalShare() {
-    return _coordinator.stopLocalShare();
-  }
-
   /// 通知屏幕共享已开始
   ///
   /// 当本地用户开始屏幕共享时调用此方法，会通过信令广播给其他用户
@@ -486,7 +470,7 @@ class AutoCoordinator {
 
     // 通知 Go 层切换到本地输入模式，并指定编码
     // 这是 Proxy Mode (局域网直连) 的关键步骤
-    startLocalShare(codec: codec);
+    // startLocalShare(codec: codec); // Disabling legacy call - handled by LoopbackPeer now
 
     // 广播给其他用户
     signaling.sendScreenShare(roomId, true);
@@ -505,7 +489,7 @@ class AutoCoordinator {
     }
 
     // 通知 Go 层停止本地分享模式（释放资源）
-    stopLocalShare();
+    // stopLocalShare(); // Disabling legacy call - handled by LoopbackPeer now
 
     // 广播给其他用户
     signaling.sendScreenShare(roomId, false);

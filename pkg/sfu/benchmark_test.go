@@ -11,7 +11,6 @@ package sfu
 import (
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,26 +290,6 @@ func BenchmarkMemoryAllocation_BufferPool(b *testing.B) {
 // ==========================================
 // 并发竞争基准测试
 // ==========================================
-
-func BenchmarkContention_SourceSwitcher(b *testing.B) {
-	switcher, _ := NewSourceSwitcher("contention-room")
-	defer switcher.Close()
-
-	var ops int64
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		packet := make([]byte, 1200)
-		for pb.Next() {
-			op := atomic.AddInt64(&ops, 1)
-			if op%2 == 0 {
-				switcher.InjectSFUPacket(true, packet)
-			} else {
-				switcher.InjectLocalPacket(true, packet)
-			}
-		}
-	})
-}
 
 func BenchmarkContention_TrafficStats(b *testing.B) {
 	stats := NewTrafficStats()
