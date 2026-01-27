@@ -174,13 +174,22 @@ class WebSocketSignaling implements SignalingBridge {
   }
 
   @override
-  Future<void> sendRelayClaim(String roomId, int epoch, double score) async {
+  Future<void> sendRelayClaim(
+    String roomId,
+    int epoch,
+    double score,
+    String? publicIp,
+  ) async {
     await _send(
       SignalingMessage(
         type: SignalingMessageType.relayClaim,
         roomId: roomId,
         peerId: localPeerId,
-        data: {'epoch': epoch, 'score': score},
+        data: {
+          'epoch': epoch,
+          'score': score,
+          if (publicIp != null) 'publicIp': publicIp,
+        },
       ),
     );
   }
@@ -191,13 +200,19 @@ class WebSocketSignaling implements SignalingBridge {
     String relayId,
     int epoch,
     double score,
+    String? publicIp,
   ) async {
     await _send(
       SignalingMessage(
         type: SignalingMessageType.relayChanged,
         roomId: roomId,
         peerId: localPeerId,
-        data: {'relayId': relayId, 'epoch': epoch, 'score': score},
+        data: {
+          'relayId': relayId,
+          'epoch': epoch,
+          'score': score,
+          if (publicIp != null) 'publicIp': publicIp,
+        },
       ),
     );
   }

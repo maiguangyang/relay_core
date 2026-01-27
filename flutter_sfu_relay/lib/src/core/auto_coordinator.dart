@@ -16,6 +16,7 @@ import '../callbacks/callbacks.dart';
 import '../enums.dart';
 import '../signaling/signaling.dart';
 import 'coordinator.dart';
+import '../utils/ip_utils.dart';
 
 /// Bot Token 请求回调类型
 /// 当设备当选为 Relay 时调用，返回 Bot Token 用于影子连接
@@ -210,6 +211,9 @@ class AutoCoordinator {
   final _remoteStreamController = StreamController<MediaStream?>.broadcast();
   final _screenShareChangedController = StreamController<String?>.broadcast();
 
+  // Public IP for Multi-LAN isolation
+  String? _publicIp;
+
   // 是否已销毁（用于防止向已关闭的 controller 添加事件）
   bool _disposed = false;
 
@@ -319,6 +323,12 @@ class AutoCoordinator {
 
       // 3. 更新本机设备信息
       _updateLocalDeviceInfo();
+
+      // 3.1 获取公网 IP (用于局域网隔离)
+      _publicIp = await IpUtils.getPublicIp();
+      print(
+        '[AutoCoordinator] Public IP for isolation: ${_publicIp ?? "Unknown"}',
+      );
 
       // 4. 连接信令
       await signaling.connect();
@@ -613,6 +623,7 @@ class AutoCoordinator {
           localPeerId,
           _currentEpoch,
           _localScore,
+          _publicIp,
         );
       }
     });
@@ -638,6 +649,7 @@ class AutoCoordinator {
           localPeerId,
           _currentEpoch,
           _localScore,
+          _publicIp,
         );
       }
     }
@@ -752,6 +764,7 @@ class AutoCoordinator {
             localPeerId,
             _currentEpoch,
             _localScore,
+            _publicIp,
           );
         } else if (_currentRelay == null) {
           // 还没有 Relay - 广播我们的 claim
@@ -843,6 +856,7 @@ class AutoCoordinator {
         localPeerId,
         _currentEpoch,
         _localScore,
+        _publicIp,
       );
       return;
     }
@@ -876,7 +890,7 @@ class AutoCoordinator {
 
       // 对方分数不如我们，或者相同但我们 ID 更大
       // 坚持我们的 Claim，告知对方
-      signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
+      signaling.sendRelayClaim(roomId, _currentEpoch, _localScore, _publicIp);
       return;
     }
 
@@ -917,6 +931,7 @@ class AutoCoordinator {
         localPeerId,
         _currentEpoch,
         _localScore,
+        _publicIp,
       );
     }
   }
@@ -977,7 +992,13 @@ class AutoCoordinator {
     _connectLiveKitBridge();
 
     // 广播我们成为 Relay
-    signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch, _localScore);
+    signaling.sendRelayChanged(
+      roomId,
+      localPeerId,
+      _currentEpoch,
+      _localScore,
+      _publicIp,
+    );
 
     _relayChangedController.add(localPeerId);
   }
@@ -1082,9 +1103,20 @@ class AutoCoordinator {
     final relayId = data?['relayId'] as String? ?? '';
     final epoch = data?['epoch'] as int? ?? 0;
     final score = (data?['score'] as num?)?.toDouble() ?? 0.0;
+    final remotePublicIp = data?['publicIp'] as String?;
 
     // 忽略无效消息
     if (relayId.isEmpty || relayId == localPeerId) return;
+
+    // Public IP 过滤: 如果公网 IP 不同，说明在不同局域网，直接忽略
+    if (_publicIp != null &&
+        remotePublicIp != null &&
+        _publicIp != remotePublicIp) {
+      print(
+        '[AutoCoordinator] Ignoring Relay $relayId from different LAN (Local: $_publicIp, Remote: $remotePublicIp)',
+      );
+      return;
+    }
 
     // 只忽略明显过期的 epoch（小于当前 epoch），相同 epoch 仍需处理
     if (epoch < _currentEpoch) {
@@ -1099,6 +1131,7 @@ class AutoCoordinator {
           localPeerId,
           _currentEpoch,
           _localScore,
+          _publicIp,
         );
       }
       return;
@@ -1141,6 +1174,7 @@ class AutoCoordinator {
         localPeerId,
         _currentEpoch,
         _localScore,
+        _publicIp,
       );
       return;
     }
@@ -1326,7 +1360,7 @@ class AutoCoordinator {
   void _broadcastClaim() {
     // 蜂窝网络设备不需要广播 claim，它们无法成为 Relay
     if (!isOnLan) return;
-    signaling.sendRelayClaim(roomId, _currentEpoch, _localScore);
+    signaling.sendRelayClaim(roomId, _currentEpoch, _localScore, _publicIp);
   }
 
   // ========== P2P 订阅者连接 ==========

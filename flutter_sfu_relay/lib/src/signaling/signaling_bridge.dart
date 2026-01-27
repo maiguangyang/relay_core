@@ -118,7 +118,12 @@ abstract class SignalingBridge {
   Future<void> sendPong(String roomId, String targetPeerId);
 
   /// 发送 Relay 声明
-  Future<void> sendRelayClaim(String roomId, int epoch, double score);
+  Future<void> sendRelayClaim(
+    String roomId,
+    int epoch,
+    double score,
+    String? publicIp,
+  );
 
   /// 发送 Relay 变更通知
   Future<void> sendRelayChanged(
@@ -126,6 +131,7 @@ abstract class SignalingBridge {
     String relayId,
     int epoch,
     double score,
+    String? publicIp,
   );
 
   /// 发送屏幕共享状态

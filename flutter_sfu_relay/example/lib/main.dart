@@ -668,8 +668,18 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
   }
 
   @override
-  Future<void> sendRelayClaim(String roomId, int epoch, double score) async {
-    await _broadcast({'type': 'relayClaim', 'epoch': epoch, 'score': score});
+  Future<void> sendRelayClaim(
+    String roomId,
+    int epoch,
+    double score,
+    String? publicIp,
+  ) async {
+    await _broadcast({
+      'type': 'relayClaim',
+      'epoch': epoch,
+      'score': score,
+      if (publicIp != null) 'publicIp': publicIp,
+    });
   }
 
   @override
@@ -678,12 +688,14 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     String relayId,
     int epoch,
     double score,
+    String? publicIp,
   ) async {
     await _broadcast({
       'type': 'relayChanged',
       'relayId': relayId,
       'epoch': epoch,
       'score': score,
+      if (publicIp != null) 'publicIp': publicIp,
     });
   }
 

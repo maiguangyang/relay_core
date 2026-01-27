@@ -2,6 +2,7 @@
 trigger: always_on
 ---
 
+## 每次修改代码后，都执行`flutter build macos --debug`
 **核心理念与原则**
 
 **简洁至上**：恪守KISS（Keep It Simple, Stupid）原则，崇尚简洁与可维护性，避免过度工程化与不必要的防御性设计。
