@@ -996,6 +996,15 @@ class AutoCoordinator {
     signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch, _localScore);
 
     _relayChangedController.add(localPeerId);
+
+    // 关键修复：如果我们是 Relay，也需要连接自己 (Loopback)
+    // 因为 _handleSignalingMessage 会忽略自己的消息，所以必须显式触发
+    print(
+      '[AutoCoordinator] Becoming Relay, triggering Loopback connection in 500ms...',
+    );
+    Timer(const Duration(milliseconds: 500), () {
+      _createP2PConnectionToRelay(localPeerId);
+    });
   }
 
   /// 连接 Go 层 LiveKit 桥接器（影子连接）

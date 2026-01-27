@@ -1352,6 +1352,27 @@ class _HomePageState extends State<HomePage> {
         if (pub.source == lk.TrackSource.screenShareVideo && !pub.muted) {
           if (pub is lk.RemoteTrackPublication) {
             // Relay 需要主动订阅来获取视频源
+            // 4. 重用现有的 P2P 连接（Loopback）
+            // 4. 重用现有的 P2P 连接（Loopback）
+            final remoteStream = _autoCoord?.p2pRemoteStream;
+            if (remoteStream != null && _p2pVideoRenderer != null) {
+              // srcObject default logic handled by null checking
+              if (_p2pVideoRenderer!.srcObject != null &&
+                  _p2pVideoRenderer!.srcObject!.id == remoteStream.id) {
+                // 流没有变化，不需要重新订阅
+                // 注意：这里是在 for 循环中，如果我们已经有了渲染器，就不需要再处理这个 Publication 了
+                // 但仍需继续执行 _configureVideoQuality 以确保 SFU 订阅状态正确
+              } else {
+                debugPrint(
+                  '[Relay] Subscribing to remote screen share track. '
+                  'Renderer ID: ${_p2pVideoRenderer!.srcObject?.id}, '
+                  'New Stream ID: ${remoteStream.id}',
+                );
+                setState(() {
+                  _p2pVideoRenderer!.srcObject = remoteStream;
+                });
+              }
+            }
             if (isRelay && !pub.subscribed) {
               debugPrint('[Relay] Subscribing to remote screen share track');
             }
@@ -2448,13 +2469,11 @@ class _HomePageState extends State<HomePage> {
     // 2. 局域网订阅者：只使用 P2P 流，等待 P2P 就绪
     // 3. 蜂窝网络设备：只使用 LiveKit 直连
 
-    if (isRelay) {
-      // Relay 节点直接使用 LiveKit 流
-      if (screenTrack != null) {
-        return lk.VideoTrackRenderer(screenTrack);
-      }
-    } else if (isOnLan) {
-      // 局域网订阅者：只使用 P2P 流
+    // 1. Relay 节点 (Loopback)：作为特殊的局域网订阅者，必须使用 P2P 流（Loopback）
+    //    虽然它有 SFU 连接，但为了节省下行带宽，SFU Track 被主动取消订阅了。
+    //    因此必须渲染 _p2pVideoRenderer。
+    if (isRelay || isOnLan) {
+      // Relay 或 局域网订阅者：优先使用 P2P 流
       if (_hasP2PVideo && _p2pVideoRenderer != null) {
         // P2P 流已就绪
         if (_p2pFirstFrameRendered) {
