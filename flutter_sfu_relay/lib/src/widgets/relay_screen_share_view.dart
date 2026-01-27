@@ -61,31 +61,49 @@ class _RelayScreenShareViewState extends State<RelayScreenShareView> {
   @override
   void dispose() {
     _streamSubscription?.cancel();
-    _p2pVideoRenderer?.dispose();
+    // Do NOT dispose the renderer here, it belongs to AutoCoordinator
     super.dispose();
   }
 
   Future<void> _initP2PRenderer() async {
     if (widget.autoCoordinator == null) return;
+    final ac = widget.autoCoordinator!;
 
-    _p2pVideoRenderer = RTCVideoRenderer();
-    await _p2pVideoRenderer!.initialize();
+    // Directly use the cached renderer from AutoCoordinator
+    if (ac.p2pRenderer != null) {
+      _p2pVideoRenderer = ac.p2pRenderer;
+      _p2pVideoRenderer!.srcObject = ac.p2pRemoteStream;
 
-    // 设置首帧渲染回调
-    _p2pVideoRenderer!.onFirstFrameRendered = () {
       if (mounted) {
         setState(() {
-          _firstFrameRendered = true;
+          _p2pRendererInitialized = true;
+          // Assume first frame is rendered if we are reusing an active renderer
+          // or set up listener if needed.
+          // For now, let's assume if it has srcObject, it might be ready or getting there.
+          // But to be safe, we can still listen.
+          // However, onFirstFrameRendered is a callback, reassignment might overwrite AC's callback?
+          // Actually AC doesn't use onFirstFrameRendered, it's a UI callback.
+          // So we can set it here safely.
+          if (_p2pVideoRenderer!.videoWidth > 0 &&
+              _p2pVideoRenderer!.videoHeight > 0) {
+            _firstFrameRendered = true;
+          }
         });
-      }
-    };
 
-    if (mounted) {
-      setState(() {
-        _p2pRendererInitialized = true;
-      });
-      _subscribeToP2PStream();
+        _p2pVideoRenderer!.onFirstFrameRendered = () {
+          if (mounted) {
+            setState(() {
+              _firstFrameRendered = true;
+            });
+          }
+        };
+      }
+    } else {
+      // Fallback or wait for AC to initialize it?
+      // AC initializes it when stream arrives.
     }
+
+    _subscribeToP2PStream();
   }
 
   void _subscribeToP2PStream() {
@@ -109,10 +127,28 @@ class _RelayScreenShareViewState extends State<RelayScreenShareView> {
     setState(() {
       _currentP2PStream = stream;
       if (stream != null) {
-        _p2pVideoRenderer!.srcObject = stream;
+        // Update srcObject on the cached renderer if needed
+        if (_p2pVideoRenderer != null) {
+          _p2pVideoRenderer!.srcObject = stream;
+        } else if (widget.autoCoordinator?.p2pRenderer != null) {
+          _p2pVideoRenderer = widget.autoCoordinator!.p2pRenderer;
+          _p2pVideoRenderer!.srcObject = stream;
+          _p2pRendererInitialized = true;
+        }
         _firstFrameRendered = false; // 新流重置首帧标志
+
+        // Re-attach first frame callback just in case
+        if (_p2pVideoRenderer != null) {
+          _p2pVideoRenderer!.onFirstFrameRendered = () {
+            if (mounted) {
+              setState(() {
+                _firstFrameRendered = true;
+              });
+            }
+          };
+        }
       } else {
-        _p2pVideoRenderer!.srcObject = null;
+        _p2pVideoRenderer?.srcObject = null;
       }
     });
 

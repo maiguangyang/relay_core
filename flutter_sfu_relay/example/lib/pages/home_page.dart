@@ -11,9 +11,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sfu_relay/flutter_sfu_relay.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:flutter_sfu_relay/src/widgets/relay_screen_share_view.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:flutter_sfu_relay/src/widgets/relay_screen_share_view.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/control_bar.dart';
@@ -96,6 +96,8 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<String>? _peerJoinedSubscription;
   StreamSubscription<String>? _peerLeftSubscription;
   StreamSubscription<String?>? _screenShareSubscription;
+
+  // P2P 远程视频流（从 Relay 接收）
 
   // LocalShareBridge - 零 FFI 本地分享桥接器
   // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
@@ -398,7 +400,17 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
-      // 5. 启动
+      // 6. 监听 P2P 远程流状态以更新 UI
+      _autoCoord!.onRemoteStream.listen((stream) {
+        if (mounted) {
+          setState(() {
+            // _hasP2PVideo = stream != null; // Managed by AutoCoordinator
+          });
+          _updateParticipants();
+        }
+      });
+
+      // 7. 启动
       await _autoCoord!.start();
 
       setState(() {
@@ -817,6 +829,7 @@ class _HomePageState extends State<HomePage> {
 
     // 4. 清理 P2P 视频渲染器
     // P2P resources managed by RelayScreenShareView implicitly
+    // _hasP2PVideo = false;
 
     // 5. 关键修复：清理屏幕共享资源（防止 Native Source 和 Go Bridge 泄漏）
     if (_localScreenShareTrack != null) {

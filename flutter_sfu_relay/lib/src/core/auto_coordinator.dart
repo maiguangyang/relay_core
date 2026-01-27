@@ -1451,6 +1451,12 @@ class AutoCoordinator {
         );
         if (event.streams.isNotEmpty) {
           _p2pRemoteStream = event.streams.first;
+
+          // 初始化缓存渲染器 (使用 Future.microtask 或 then 避免 async 问题)
+          _p2pRenderer ??= RTCVideoRenderer();
+          _p2pRenderer!.initialize().then((_) {
+            _p2pRenderer!.srcObject = _p2pRemoteStream;
+          });
           if (!_disposed) {
             _remoteStreamController.add(_p2pRemoteStream);
 
