@@ -416,39 +416,68 @@ class _HomePageState extends State<HomePage> {
       ) async {
         if (stream != null) {
           debugPrint('[P2P] Received remote stream from Relay');
-          // 初始化视频渲染器
-          _p2pVideoRenderer ??= RTCVideoRenderer();
-          await _p2pVideoRenderer!.initialize();
 
-          // 设置首帧渲染回调 - 当第一个视频帧被渲染时调用
-          _p2pVideoRenderer!.onFirstFrameRendered = () {
-            debugPrint('[P2P] First video frame rendered!');
+          try {
+            // Debug: Check tracks
+            for (final track in stream.getTracks()) {
+              debugPrint(
+                '[P2P] Stream Track: id=${track.id}, kind=${track.kind}, enabled=${track.enabled}',
+              );
+            }
+
+            // 关键修复：Windows 上重用 Renderer 可能会导致黑屏
+            // 每次收到新流时，强制销毁并重新创建 Renderer
+            if (_p2pVideoRenderer != null) {
+              _p2pVideoRenderer!.srcObject = null;
+              await _p2pVideoRenderer!.dispose();
+              _p2pVideoRenderer = null;
+            }
+
+            _p2pVideoRenderer = RTCVideoRenderer();
+            await _p2pVideoRenderer!.initialize();
+
+            // 设置首帧渲染回调
+            _p2pVideoRenderer!.onFirstFrameRendered = () {
+              debugPrint(
+                '[P2P] First video frame rendered! Size: ${_p2pVideoRenderer?.videoWidth}x${_p2pVideoRenderer?.videoHeight}',
+              );
+              if (mounted) {
+                setState(() {
+                  _p2pFirstFrameRendered = true;
+                });
+              }
+            };
+
+            // 必须先设置 srcObject
+            _p2pVideoRenderer!.srcObject = stream;
+            _p2pRemoteStream = stream;
+
             if (mounted) {
               setState(() {
-                _p2pFirstFrameRendered = true;
+                _hasP2PVideo = true;
+                _p2pFirstFrameRendered = false; // 重置首帧状态，等待回调
               });
+              // 强制刷新相关 UI
+              _updateParticipants();
             }
-          };
-
-          _p2pVideoRenderer!.srcObject = stream;
-          _p2pRemoteStream = stream;
-          if (mounted) {
-            setState(() {
-              _hasP2PVideo = true;
-              _p2pFirstFrameRendered = false; // 重置首帧状态
-            });
-            // P2P 连接后重新检测屏幕共享
-            // 因为 screenShare 消息可能在 P2P 连接之前就收到了
-            _updateParticipants();
+          } catch (e) {
+            debugPrint('[P2P] Error initializing renderer: $e');
           }
         } else {
           debugPrint('[P2P] Remote stream disconnected');
-          _p2pVideoRenderer?.srcObject = null;
+
+          if (_p2pVideoRenderer != null) {
+            _p2pVideoRenderer!.srcObject = null;
+            await _p2pVideoRenderer!.dispose();
+            _p2pVideoRenderer = null;
+          }
+
           _p2pRemoteStream = null;
+
           if (mounted) {
             setState(() {
               _hasP2PVideo = false;
-              _p2pFirstFrameRendered = false; // 重置首帧状态
+              _p2pFirstFrameRendered = false;
             });
             _updateParticipants();
           }
