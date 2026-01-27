@@ -43,7 +43,7 @@ class _HomePageState extends State<HomePage> {
   final _urlController = TextEditingController(
     // text: 'wss://frp.marlon.proton-system.com',
     // text: 'wss://oxygen-sl1zv95n.livekit.cloud',
-    text: 'ws://192.167.167.129:7880',
+    text: 'wss://live.kuonang.com',
   );
   final _tokenController = TextEditingController();
   // 影子连接专用：Bot Token (identity: "relay-bot", hidden: true, canSubscribe: true)
@@ -51,7 +51,7 @@ class _HomePageState extends State<HomePage> {
     // 测试用写死的 Bot Token
     text:
         // 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTkxMTc5MzcsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NzU4MTkzNywic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.pj328J32dm8ota1xlirBaTs8B_BIIpiopN68BGMjYxk',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzAzMzkwMzAsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoibWFybG9uIiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2OTQ3NTAzMCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6Im9mZmljZS10ZXN0LTk5OCIsInJvb21Kb2luIjp0cnVlfX0.UO6nwgWbK56L2RiRlXnbf8IlTQO1CzNSh5UusAVaZPk',
   );
 
   // 页面状态
