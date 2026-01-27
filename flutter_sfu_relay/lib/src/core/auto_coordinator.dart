@@ -1450,13 +1450,23 @@ class AutoCoordinator {
           '[P2P] onTrack event: ${event.track.kind}, id=${event.track.id}, streams=${event.streams.length}',
         );
         if (event.streams.isNotEmpty) {
-          _p2pRemoteStream = event.streams.first;
+          // 只有视频流才需要初始化渲染器
+          if (event.track.kind == 'video') {
+            _p2pRemoteStream = event.streams.first;
 
-          // 初始化缓存渲染器 (使用 Future.microtask 或 then 避免 async 问题)
-          _p2pRenderer ??= RTCVideoRenderer();
-          _p2pRenderer!.initialize().then((_) {
-            _p2pRenderer!.srcObject = _p2pRemoteStream;
-          });
+            // 初始化缓存渲染器 (使用 Future.microtask 或 then 避免 async 问题)
+            if (_p2pRenderer == null) {
+              _p2pRenderer = RTCVideoRenderer();
+              _p2pRenderer!.initialize().then((_) {
+                _p2pRenderer!.srcObject = _p2pRemoteStream;
+              });
+            } else {
+              // 如果已经初始化，直接更新 srcObject (防止被重置)
+              if (_p2pRenderer!.srcObject != _p2pRemoteStream) {
+                _p2pRenderer!.srcObject = _p2pRemoteStream;
+              }
+            }
+          }
           if (!_disposed) {
             _remoteStreamController.add(_p2pRemoteStream);
 
@@ -1516,6 +1526,8 @@ class AutoCoordinator {
           print('[P2P] Remote stream disconnected or failed: $state');
           _p2pConnected = false;
           _p2pRemoteStream = null;
+          // Clean up renderer state
+          _p2pRenderer?.srcObject = null;
           if (!_disposed) {
             _remoteStreamController.add(null);
 

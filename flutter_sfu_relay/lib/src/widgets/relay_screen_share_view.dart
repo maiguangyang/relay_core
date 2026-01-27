@@ -61,8 +61,24 @@ class _RelayScreenShareViewState extends State<RelayScreenShareView> {
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    if (_p2pVideoRenderer != null) {
+      _p2pVideoRenderer!.removeListener(_onRendererChanged);
+    }
     // Do NOT dispose the renderer here, it belongs to AutoCoordinator
     super.dispose();
+  }
+
+  void _onRendererChanged() {
+    if (!mounted || _p2pVideoRenderer == null) return;
+    // Check if we have valid dimensions, meaning a frame is rendered
+    if (_p2pVideoRenderer!.videoWidth > 0 &&
+        _p2pVideoRenderer!.videoHeight > 0) {
+      if (!_firstFrameRendered) {
+        setState(() {
+          _firstFrameRendered = true;
+        });
+      }
+    }
   }
 
   Future<void> _initP2PRenderer() async {
@@ -75,27 +91,21 @@ class _RelayScreenShareViewState extends State<RelayScreenShareView> {
       _p2pVideoRenderer!.srcObject = ac.p2pRemoteStream;
 
       if (mounted) {
+        // Attach listener to catch frame updates (robust against missed callbacks)
+        _p2pVideoRenderer!.addListener(_onRendererChanged);
+
         setState(() {
           _p2pRendererInitialized = true;
-          // Assume first frame is rendered if we are reusing an active renderer
-          // or set up listener if needed.
-          // For now, let's assume if it has srcObject, it might be ready or getting there.
-          // But to be safe, we can still listen.
-          // However, onFirstFrameRendered is a callback, reassignment might overwrite AC's callback?
-          // Actually AC doesn't use onFirstFrameRendered, it's a UI callback.
-          // So we can set it here safely.
+          // Initial check
           if (_p2pVideoRenderer!.videoWidth > 0 &&
               _p2pVideoRenderer!.videoHeight > 0) {
             _firstFrameRendered = true;
           }
         });
 
+        // We still keep the callback as a backup or for instant notification
         _p2pVideoRenderer!.onFirstFrameRendered = () {
-          if (mounted) {
-            setState(() {
-              _firstFrameRendered = true;
-            });
-          }
+          _onRendererChanged();
         };
       }
     } else {
@@ -137,18 +147,21 @@ class _RelayScreenShareViewState extends State<RelayScreenShareView> {
         }
         _firstFrameRendered = false; // 新流重置首帧标志
 
-        // Re-attach first frame callback just in case
+        // Monitor the renderer
         if (_p2pVideoRenderer != null) {
+          _p2pVideoRenderer!.addListener(_onRendererChanged);
+          // Trigger initial check for this stream
+          _onRendererChanged();
+
           _p2pVideoRenderer!.onFirstFrameRendered = () {
-            if (mounted) {
-              setState(() {
-                _firstFrameRendered = true;
-              });
-            }
+            _onRendererChanged();
           };
         }
       } else {
-        _p2pVideoRenderer?.srcObject = null;
+        if (_p2pVideoRenderer != null) {
+          _p2pVideoRenderer!.removeListener(_onRendererChanged);
+          _p2pVideoRenderer!.srcObject = null;
+        }
       }
     });
 
