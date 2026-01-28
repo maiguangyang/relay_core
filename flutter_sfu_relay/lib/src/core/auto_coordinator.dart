@@ -549,10 +549,6 @@ class AutoCoordinator {
   }
 
   /// P2P 反向注入: 将本地流添加到 Relay 连接
-  ///
-  /// 当本地用户开始屏幕共享时，如果已经与 Relay 建立了 P2P 连接，
-  /// 可以直接将屏幕共享 Track 添加到该连接，Relay 会自动转发给其他人。
-  /// 实现真正的 "Bidirectional" P2P.
   Future<void> addTrackToRelay(MediaStreamTrack track) async {
     if (_p2pConnection == null) {
       // ignore: avoid_print
@@ -566,16 +562,31 @@ class AutoCoordinator {
     print('[AutoCoordinator] Adding track to Relay connection: ${track.id}');
 
     // 关键修复: 不要使用 _p2pRemoteStream (recv-only) 作为本地 Track 的容器
-    // 这会导致 "stream [relay-stream] not found" 错误，因为 Native 层可能试图操作远程流
-    // 我们应该创建一个专门的本地流用于上行
     if (_p2pLocalStream == null) {
       _p2pLocalStream = await createLocalMediaStream('p2p-upstream');
     }
     _p2pLocalStream!.addTrack(track);
 
-    await _p2pConnection!.addTrack(track, _p2pLocalStream!);
+    final sender = await _p2pConnection!.addTrack(track, _p2pLocalStream!);
+
+    // 强制设置高质量参数 (P2P screen share should be high quality)
+    // Default WebRTC maxBitrate usually limits to ~2.5Mbps initially
+    // We set it to 8Mbps (8000000) for sharp text/video
+    try {
+      final params = sender.parameters;
+      if (params.encodings != null && params.encodings!.isNotEmpty) {
+        params.encodings!.first.maxBitrate = 8000 * 1000; // 8 Mbps
+        // params.encodings!.first.maxFramerate = 30; // 30 FPS (Let capture decide)
+        await sender.setParameters(params); // Wait for this to complete
+        print('[AutoCoordinator] Set P2P sender parameters: 8Mbps');
+      }
+    } catch (e) {
+      print('[AutoCoordinator] Failed to set sender parameters: $e');
+    }
 
     // 触发 renegotiation (发送新的 Offer 给 Relay)
+    // Use _renegotiateP2P to match naming in other parts or _renegotiate if that is the method name
+    // The viewed file has _renegotiate() at line 579, so we keep it.
     await _renegotiate();
   }
 
