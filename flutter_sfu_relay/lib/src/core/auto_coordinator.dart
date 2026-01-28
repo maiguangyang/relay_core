@@ -11,6 +11,8 @@ import 'package:ffi/ffi.dart';
 
 import '../bindings/bindings.dart';
 import '../bindings/utils.dart';
+import '../media/local_share_bridge.dart';
+import 'dart:typed_data';
 import 'dart:convert';
 import '../callbacks/callbacks.dart';
 import '../enums.dart';
@@ -187,6 +189,12 @@ class AutoCoordinator {
   MediaStream? _p2pLocalStream; // 用于 P2P 上行的本地流容器
   bool _p2pConnected = false;
 
+  // Monitor 连接 (Relay Loopback)
+  // 用于 Relay 本地通过 P2P 接收 SourceSwitcher 的输出
+  // 从而实现本地预览和 Cloud 转推
+  RTCPeerConnection? _monitorConnection;
+  MediaStream? _monitorStream;
+
   // 屏幕共享状态
   String? _screenSharerPeerId; // 当前屏幕共享者的 ID
   bool _isLocalScreenSharing = false; // 本机是否正在屏幕共享
@@ -210,6 +218,10 @@ class AutoCoordinator {
   final _errorController = StreamController<String>.broadcast();
   final _remoteStreamController = StreamController<MediaStream?>.broadcast();
   final _screenShareChangedController = StreamController<String?>.broadcast();
+  final _monitorStreamController = StreamController<MediaStream?>.broadcast();
+
+  // LocalShareBridge - 零 FFI 本地分享桥接器
+  LocalShareBridge? _localShareBridge;
 
   // 是否已销毁（用于防止向已关闭的 controller 添加事件）
   bool _disposed = false;
@@ -292,6 +304,9 @@ class AutoCoordinator {
   /// 当有人开始/停止屏幕共享时触发，发出共享者 ID（null 表示没人共享）
   Stream<String?> get onScreenShareChanged =>
       _screenShareChangedController.stream;
+
+  /// Monitor 流变化事件 (Relay 专用)
+  Stream<MediaStream?> get onMonitorStream => _monitorStreamController.stream;
 
   // ========== 生命周期 ==========
 
@@ -393,6 +408,9 @@ class AutoCoordinator {
     await _p2pLocalStream?.dispose();
     _p2pLocalStream = null;
 
+    // 断开 Monitor 连接
+    await _closeMonitorConnection();
+
     _peers.clear();
     _currentRelay = null;
     _electionFailureCount = 0;
@@ -410,8 +428,10 @@ class AutoCoordinator {
     _peerJoinedController.close();
     _peerLeftController.close();
     _errorController.close();
+    _errorController.close();
     _remoteStreamController.close();
     _screenShareChangedController.close();
+    _monitorStreamController.close();
   }
 
   // ========== 公开方法 ==========
@@ -1061,6 +1081,10 @@ class AutoCoordinator {
 
     // 启动 Go 层 LiveKit 桥接（如果配置了 URL 和 Token）
     _connectLiveKitBridge();
+
+    // 启动 Monitor 连接 (Local Loopback)
+    // 这样 Relay 本地也能看到清晰的 P2P 画面，并将其转推给 Cloud
+    _createMonitorConnection();
 
     // 广播我们成为 Relay
     signaling.sendRelayChanged(roomId, localPeerId, _currentEpoch, _localScore);
@@ -1760,6 +1784,159 @@ class AutoCoordinator {
       }
     } catch (e) {
       print('[Relay] Error adding ICE candidate: $e');
+    }
+  }
+
+  // ========== Monitor 连接 (Relay Loopback) ==========
+
+  Future<void> _createMonitorConnection() async {
+    if (_monitorConnection != null) return;
+
+    try {
+      final configuration = <String, dynamic>{
+        'iceServers': [], // Localhost 不需要 STUN/TURN
+        'sdpSemantics': 'unified-plan',
+      };
+
+      _monitorConnection = await createPeerConnection(configuration);
+
+      _monitorConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+      _monitorConnection!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+
+      _monitorConnection!.onTrack = (RTCTrackEvent event) {
+        if (event.streams.isNotEmpty) {
+          _monitorStream = event.streams.first;
+          if (!_disposed) {
+            _monitorStreamController.add(_monitorStream);
+          }
+          print('[Monitor] Received monitor stream from Relay Core');
+        }
+      };
+
+      final offer = await _monitorConnection!.createOffer();
+      await _monitorConnection!.setLocalDescription(offer);
+
+      // 同步调用 Go 接口建立连接
+      final monitorId = '$localPeerId-monitor';
+      final roomPtr = toCString(roomId);
+      final peerPtr = toCString(monitorId);
+      final offerPtr = toCString(offer.sdp!);
+
+      final answerPtr = bindings.RelayRoomAddSubscriber(
+        roomPtr,
+        peerPtr,
+        offerPtr,
+      );
+
+      calloc.free(roomPtr);
+      calloc.free(peerPtr);
+      calloc.free(offerPtr);
+
+      if (answerPtr != Pointer.fromAddress(0)) {
+        final answerSdp = fromCString(answerPtr);
+        await _monitorConnection!.setRemoteDescription(
+          RTCSessionDescription(answerSdp, 'answer'),
+        );
+        print('[Monitor] Loopback established successfully');
+      } else {
+        print('[Monitor] Failed to get answer from Relay Core');
+      }
+    } catch (e) {
+      print('[Monitor] Failed to create monitor connection: $e');
+    }
+  }
+
+  Future<void> _closeMonitorConnection() async {
+    if (_monitorConnection != null) {
+      await _monitorConnection!.close();
+      await _monitorConnection!.dispose();
+      _monitorConnection = null;
+    }
+    _monitorStream = null;
+    if (!_disposed) {
+      _monitorStreamController.add(null);
+    }
+  }
+
+  /// 处理屏幕共享的双路推流逻辑 (Cloud + P2P Relay)
+  ///
+  /// 该方法封装了"反向 P2P 优化"逻辑：
+  /// 如果当前设备与 Relay 建立了 P2P 连接，不仅会将流推送到云端（通过 [onPublishToCloud] 回调），
+  /// 还会通过 P2P 通道将流直接注入给 Relay，以实现 Relay 端的高清低延迟观看。
+  ///
+  /// [track] : 屏幕共享的 MediaStreamTrack
+  /// [onPublishToCloud] : 执行云端推流的回调函数。由于本插件不直接依赖 LiveKit SDK，
+  ///                      需要调用者在此回调中实现具体的 room.localParticipant.publishVideoTrack 逻辑。
+  Future<void> handleScreenSharePublishing({
+    required MediaStreamTrack track,
+    required Future<void> Function() onPublishToCloud,
+  }) async {
+    // 1. 始终执行常规的云端发布 (保障非局域网用户体验)
+    try {
+      await onPublishToCloud();
+    } catch (e) {
+      print('[AutoCoordinator] Cloud publish failed: $e');
+      rethrow; // 云端发布失败通常应视为整体失败
+    }
+
+    // 2. Reverse P2P Optimization (若满足条件，额外注入到 Relay)
+    // 条件：不是 Relay (是普通客户端) && 已建立到 Relay 的 P2P 连接
+    try {
+      if (!isRelay && hasP2PConnection) {
+        print(
+          '[AutoCoordinator] P2P active, sending screen share to Relay (Dual Path)',
+        );
+        await addTrackToRelay(track);
+      }
+    } catch (e) {
+      // P2P 优化失败不应影响主流程，仅打印日志
+      print('[AutoCoordinator] Failed to add track to Relay (Dual Path): $e');
+    }
+  }
+
+  /// 启动本地屏幕共享（零拷贝 UDP 模式）
+  ///
+  /// 初始化并启动 LocalShareBridge，返回监听端口。
+  /// 此模式通过 UDP 直接向 Go 层发送 RTP 包，避免 FFI 拷贝开销。
+  Future<int> startLocalScreenShare() async {
+    if (_localShareBridge != null) {
+      return _localShareBridge!.start(); // Already running or starting
+    }
+
+    _localShareBridge = LocalShareBridge(roomId: roomId);
+    try {
+      final port = await _localShareBridge!.start();
+      print('[AutoCoordinator] LocalShareBridge started on port $port');
+      return port;
+    } catch (e) {
+      print('[AutoCoordinator] Failed to start LocalShareBridge: $e');
+      _localShareBridge = null;
+      rethrow;
+    }
+  }
+
+  /// 发送本地屏幕共享 RTP 包
+  ///
+  /// 需要先调用 [startLocalScreenShare] 启动桥接器。
+  bool sendLocalScreenSharePacket(Uint8List packet) {
+    if (_localShareBridge == null || !_localShareBridge!.isRunning) {
+      return false;
+    }
+    return _localShareBridge!.sendRtpPacket(packet);
+  }
+
+  /// 停止本地屏幕共享
+  Future<void> stopLocalScreenShare() async {
+    if (_localShareBridge != null) {
+      print('[AutoCoordinator] Stopping LocalShareBridge...');
+      await _localShareBridge!.destroy();
+      _localShareBridge = null;
     }
   }
 }

@@ -104,16 +104,18 @@ class _HomePageState extends State<HomePage> {
   bool _hasP2PVideo = false;
   bool _p2pFirstFrameRendered = false; // 视频首帧是否已渲染
 
+  // Monitor 渲染器 (Relay 本地预览)
+  RTCVideoRenderer? _monitorVideoRenderer;
+  MediaStream? _monitorStream;
+  StreamSubscription<MediaStream?>? _monitorStreamSubscription;
+  lk.LocalTrackPublication? _monitorCloudPublication;
+
   // AutoCoordinator 订阅（必须取消以避免内存泄漏）
   StreamSubscription<AutoCoordinatorState>? _stateSubscription;
   StreamSubscription<String>? _relayChangedSubscription;
   StreamSubscription<String>? _peerJoinedSubscription;
   StreamSubscription<String>? _peerLeftSubscription;
   StreamSubscription<String?>? _screenShareSubscription;
-
-  // LocalShareBridge - 零 FFI 本地分享桥接器
-  // 使用 UDP 发送 RTP 包到 Go 层，避免 FFI 开销
-  LocalShareBridge? _localShareBridge;
 
   // 本地屏幕共享 Track (桌面平台手动创建，需要手动释放)
   lk.LocalVideoTrack? _localScreenShareTrack;
@@ -460,6 +462,63 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
+      // 监听 Monitor 流 (Relay Loopback)
+      // Relay 自身也是客户端，它通过 P2P 环回接口从 Go 层接收混合后的流
+      // 然后在这里将流发布到云端 (Masquerade)
+      _monitorStreamSubscription = _autoCoord!.onMonitorStream.listen((
+        stream,
+      ) async {
+        if (stream != null) {
+          debugPrint('[HomePage] Received Monitor stream (Relay Loopback)');
+          _monitorStream = stream;
+          await _setupMonitorVideoRenderer(stream);
+
+          // 转推 Monitor 流到云端 (TODO: Disabled due to SDK issues - LocalVideoTrack constructor)
+          /*
+          if (stream.getVideoTracks().isNotEmpty) {
+            try {
+              final track = stream.getVideoTracks().first;
+              // 创建 LocalTrack from MediaStreamTrack
+              final localTrack = lk.LocalVideoTrack(track);
+
+              // 发布到云端 (High Quality)
+              _monitorCloudPublication = await _room?.localParticipant
+                  ?.publishVideoTrack(
+                    localTrack,
+                    lk.VideoPublishOptions(
+                      videoEncoding: const lk.VideoEncoding(
+                        maxBitrate: 8000 * 1000,
+                        maxFramerate: 30,
+                      ),
+                      simulcast: false,
+                    ),
+                  );
+              debugPrint('[HomePage] Republished Monitor stream to Cloud');
+            } catch (e) {
+              debugPrint('[HomePage] Failed to republish Monitor stream: $e');
+            }
+          }
+          */
+        } else {
+          debugPrint('[HomePage] Monitor stream cleared');
+          _monitorVideoRenderer?.srcObject = null;
+          // 取消发布
+          if (_monitorCloudPublication != null) {
+            /*
+            try {
+              // 尝试 dispose track 以停止发布
+              await _monitorCloudPublication?.track?.dispose();
+            } catch (e) {
+              // ignore
+            }
+            */
+            _monitorCloudPublication = null;
+          }
+          _monitorStream = null;
+          if (mounted) setState(() {});
+        }
+      });
+
       setState(() {
         _isConnecting = false;
         _isInMeeting = true;
@@ -794,11 +853,12 @@ class _HomePageState extends State<HomePage> {
           }
           _localScreenShareTrack = null;
         }
-        // 清理 LocalShareBridge
-        if (_localShareBridge != null) {
-          await _localShareBridge!.destroy();
-          debugPrint('[LocalShareBridge] Destroyed on disconnect');
-          _localShareBridge = null;
+        // 清理 LocalShareBridge (Delegate to AutoCoordinator)
+        if (_autoCoord != null) {
+          await _autoCoord!.stopLocalScreenShare();
+          debugPrint(
+            '[LocalShareBridge] Destroyed on disconnect via AutoCoordinator',
+          );
         }
       } catch (e) {
         debugPrint('Error stopping local screen share: $e');
@@ -898,6 +958,13 @@ class _HomePageState extends State<HomePage> {
     _p2pVideoRenderer?.srcObject = null;
     _p2pVideoRenderer?.dispose();
     _p2pVideoRenderer = null;
+
+    // 清理 Monitor 渲染器 (Relay Loopback)
+    _monitorStreamSubscription?.cancel();
+    _monitorStreamSubscription = null;
+    _monitorVideoRenderer?.srcObject = null;
+    _monitorVideoRenderer?.dispose();
+    _monitorVideoRenderer = null;
     // 关键修复：MediaStream 需要 dispose() 释放 Native 资源
     await _p2pRemoteStream?.dispose();
     _p2pRemoteStream = null;
@@ -917,15 +984,16 @@ class _HomePageState extends State<HomePage> {
       _localScreenShareTrack = null;
     }
 
-    if (_localShareBridge != null) {
+    if (_autoCoord != null) {
       try {
-        debugPrint('[Cleanup] Destroying Local Share Bridge...');
-        await _localShareBridge!.destroy();
+        debugPrint(
+          '[Cleanup] Destroying Local Share Bridge via AutoCoordinator...',
+        );
+        await _autoCoord!.stopLocalScreenShare();
         debugPrint('[Cleanup] Local Share Bridge destroyed');
       } catch (e) {
         debugPrint('[Cleanup] Error destroying share bridge: $e');
       }
-      _localShareBridge = null;
     }
 
     // 等待更长时间，让 SDK 完成异步清理（解决网络切换后 LocalParticipant 类型错误）
@@ -1091,34 +1159,45 @@ class _HomePageState extends State<HomePage> {
             debugPrint('[ScreenShare] Track created:');
             debugPrint('[ScreenShare]   - Track SID: ${track.sid}');
 
-            await _localParticipant!.publishVideoTrack(
-              track,
-              publishOptions: lk.VideoPublishOptions(
-                // 动态选择编码器
-                videoCodec: selectedCodec,
-                videoEncoding: lk.VideoEncoding(
-                  maxBitrate: maxBitrate,
-                  maxFramerate: maxFramerate,
-                ),
-                simulcast: false, // 禁用 simulcast，避免低质量层级
-                // 关键修复：强制使用 L1T1 (无 SVC)，防止 Relay 转发时出现 VP9 图层引用错误导致的残影
-                scalabilityMode: 'L1T1',
-              ),
-            );
-
-            // Reverse P2P Optimization:
-            // 如果我们不是 Relay，但我们连接到了 Relay (局域网 P2P)，
-            // 我们应该同时把流推给 Relay，让 Relay 帮我们转发给其他人。
-            if (_autoCoord != null &&
-                !_autoCoord!.isRelay &&
-                _autoCoord!.hasP2PConnection) {
-              debugPrint(
-                '[ScreenShare] Reverse P2P: Injecting track to Relay...',
+            // 使用 SDK 提供的双路推流优化 (Cloud + P2P)
+            // 这将根据当前网络状态自动决定是否需要向 Relay 注入高清流
+            if (_autoCoord != null) {
+              await _autoCoord!.handleScreenSharePublishing(
+                track: track.mediaStreamTrack,
+                onPublishToCloud: () async {
+                  // 执行常规云端发布 (保障非局域网用户体验)
+                  await _localParticipant!.publishVideoTrack(
+                    track!,
+                    // ignore: invalid_use_of_protected_member
+                    publishOptions: lk.VideoPublishOptions(
+                      videoCodec: selectedCodec ?? 'vp9',
+                      videoEncoding: lk.VideoEncoding(
+                        maxBitrate: maxBitrate,
+                        maxFramerate: maxFramerate,
+                      ),
+                      simulcast: false,
+                      scalabilityMode: 'L1T1',
+                    ),
+                  );
+                },
               );
-              await _autoCoord!.addTrackToRelay(track.mediaStreamTrack);
+            } else {
+              // Fallback if autoCoord is null (unlikely)
+              await _localParticipant!.publishVideoTrack(
+                track,
+                publishOptions: lk.VideoPublishOptions(
+                  videoCodec: selectedCodec ?? 'vp9',
+                  videoEncoding: lk.VideoEncoding(
+                    maxBitrate: maxBitrate,
+                    maxFramerate: maxFramerate,
+                  ),
+                  simulcast: false,
+                  scalabilityMode: 'L1T1',
+                ),
+              );
             }
 
-            // 保存 Track 引用，停止屏幕共享时需要手动释放
+            // 保存 Track 引用
             _localScreenShareTrack = track;
 
             // 发布后再次检查
@@ -1301,29 +1380,30 @@ class _HomePageState extends State<HomePage> {
         // 🚀 使用 LocalShareBridge 优化：零 FFI 本地分享
         // 创建并启动 UDP 桥接器，RTP 包通过 UDP 发送到 Go 层
         try {
-          final roomId = _room?.name ?? 'room';
-          _localShareBridge = LocalShareBridge(roomId: roomId);
-          final port = await _localShareBridge!.start();
-          debugPrint(
-            '[LocalShareBridge] Started on port $port for room: $roomId',
-          );
-          debugPrint(
-            '[LocalShareBridge] RTP packets will be sent via UDP (zero FFI!)',
-          );
+          if (_autoCoord != null) {
+            final port = await _autoCoord!.startLocalScreenShare();
+            debugPrint(
+              '[LocalShareBridge] Started on port $port for room: ${_room?.name}',
+            );
+            debugPrint(
+              '[LocalShareBridge] RTP packets will be sent via UDP (zero FFI!)',
+            );
+            // Notify startup *after* bridge is ready
+            _autoCoord!.notifyScreenShareStarted(codec: selectedCodec);
+          }
         } catch (e) {
           debugPrint(
             '[LocalShareBridge] Failed to start: $e, falling back to FFI path',
           );
-          _localShareBridge = null;
+          // If bridge fails, still notify core (it might fallback to slower FFI?)
+          // But notifyScreenShareStarted primarily triggers Go side updates
+          _autoCoord?.notifyScreenShareStarted(codec: selectedCodec);
         }
-
-        _autoCoord?.notifyScreenShareStarted(codec: selectedCodec);
       } else {
         // 停止 LocalShareBridge
-        if (_localShareBridge != null) {
-          await _localShareBridge!.destroy();
+        if (_autoCoord != null) {
+          await _autoCoord!.stopLocalScreenShare();
           debugPrint('[LocalShareBridge] Stopped and destroyed');
-          _localShareBridge = null;
         }
 
         _autoCoord?.notifyScreenShareStopped();
@@ -2592,7 +2672,15 @@ class _HomePageState extends State<HomePage> {
     // 3. 蜂窝网络设备：只使用 LiveKit 直连
 
     if (isRelay) {
-      // Relay 节点直接使用 LiveKit 流
+      // Relay 节点
+      // 如果有 Monitor Stream (Loopback from B), 优先显示 Monitor Stream
+      if (_monitorVideoRenderer != null && _monitorStream != null) {
+        return RTCVideoView(
+          _monitorVideoRenderer!,
+          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+        );
+      }
+      // 否则回退到 LiveKit 流 (可能是自己分享，或 B->Cloud)
       if (screenTrack != null) {
         return lk.VideoTrackRenderer(screenTrack);
       }
@@ -2930,6 +3018,13 @@ class _HomePageState extends State<HomePage> {
       default:
         return '离线';
     }
+  }
+
+  Future<void> _setupMonitorVideoRenderer(MediaStream stream) async {
+    _monitorVideoRenderer ??= RTCVideoRenderer();
+    await _monitorVideoRenderer!.initialize();
+    _monitorVideoRenderer!.srcObject = stream;
+    if (mounted) setState(() {});
   }
 }
 
