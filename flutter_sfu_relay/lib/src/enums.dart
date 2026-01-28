@@ -69,6 +69,7 @@ enum SfuEventType {
   subscriberJoined(10),
   subscriberLeft(11),
   renegotiate(12),
+  keyframeRequest(13),
   // 心跳检测事件 (来自 KeepaliveManager)
   peerOnline(20),
   peerSlow(21),

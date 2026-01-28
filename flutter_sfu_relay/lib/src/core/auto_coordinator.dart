@@ -822,8 +822,37 @@ class AutoCoordinator {
         _handleScreenShareMessage(message.peerId, message.data);
         break;
 
+      case SignalingMessageType.keyframeRequest:
+        _forceKeyframe();
+        break;
+
       default:
         break;
+    }
+  }
+
+  /// 强制重新生成关键帧 (P2P Path)
+  Future<void> _forceKeyframe() async {
+    print('[AutoCoordinator] Force Keyframe requested via signaling');
+    if (_p2pConnection == null) return;
+
+    try {
+      final senders = await _p2pConnection!.getSenders();
+      for (final sender in senders) {
+        if (sender.track?.kind == 'video') {
+          // 通过设置参数触发关键帧 (WebRTC Hack)
+          final params = sender.parameters;
+          if (params.encodings != null && params.encodings!.isNotEmpty) {
+            // 仅仅重新设置现有参数通常足以触发 Encoder 重置/IDR
+            await sender.setParameters(params);
+            print(
+              '[AutoCoordinator] Triggered Keyframe generation on P2P sender',
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('[AutoCoordinator] Failed to force keyframe: $e');
     }
   }
 
@@ -1347,6 +1376,18 @@ class AutoCoordinator {
 
       case SfuEventType.error:
         _errorController.add(event.data ?? 'Unknown error');
+        break;
+
+      case SfuEventType.keyframeRequest:
+        // Relay 收到关键帧请求 (Go -> Dart)
+        // 表示 Monitor 连接 (订阅者) 缺帧
+        // 我们需要通知 P2P 发送端 (Peer B) 生成关键帧
+        print(
+          '[Relay] Received KeyframeRequest from Go, forwarding to sharer: $_screenSharerPeerId',
+        );
+        if (_screenSharerPeerId != null && _screenSharerPeerId != localPeerId) {
+          signaling.sendKeyframeRequest(roomId, _screenSharerPeerId!);
+        }
         break;
 
       default:

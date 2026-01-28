@@ -215,6 +215,18 @@ class WebSocketSignaling implements SignalingBridge {
   }
 
   @override
+  Future<void> sendKeyframeRequest(String roomId, String targetPeerId) async {
+    await _send(
+      SignalingMessage(
+        type: SignalingMessageType.keyframeRequest,
+        roomId: roomId,
+        peerId: localPeerId,
+        targetPeerId: targetPeerId,
+      ),
+    );
+  }
+
+  @override
   void dispose() {
     _shouldReconnect = false;
     _socket?.close();

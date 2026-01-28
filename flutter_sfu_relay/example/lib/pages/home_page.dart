@@ -3194,6 +3194,11 @@ class _LiveKitSignaling implements SignalingBridge {
     await _broadcast({'type': 'screenShare', 'isSharing': isSharing});
   }
 
+  @override
+  Future<void> sendKeyframeRequest(String roomId, String targetPeerId) async {
+    await _broadcast({'type': 'keyframeRequest', 'targetPeerId': targetPeerId});
+  }
+
   Future<void> _broadcast(Map<String, dynamic> data) async {
     // 如果已经 disposed，直接返回，避免触发 LiveKit SDK 的类型转换错误
     if (_disposed) {
@@ -3296,6 +3301,8 @@ class _LiveKitSignaling implements SignalingBridge {
         return SignalingMessageType.candidate;
       case 'screenShare':
         return SignalingMessageType.screenShare;
+      case 'keyframeRequest':
+        return SignalingMessageType.keyframeRequest;
       default:
         return SignalingMessageType.error;
     }

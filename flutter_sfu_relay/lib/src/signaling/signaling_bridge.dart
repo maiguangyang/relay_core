@@ -35,6 +35,9 @@ enum SignalingMessageType {
 
   /// 错误
   error,
+
+  /// Keyframe Request
+  keyframeRequest,
 }
 
 /// 信令消息
@@ -132,6 +135,9 @@ abstract class SignalingBridge {
   ///
   /// [isSharing] true 表示开始共享，false 表示停止共享
   Future<void> sendScreenShare(String roomId, bool isSharing);
+
+  /// 发送关键帧请求
+  Future<void> sendKeyframeRequest(String roomId, String targetPeerId);
 
   /// 消息流
   Stream<SignalingMessage> get messages;

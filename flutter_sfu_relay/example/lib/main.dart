@@ -738,6 +738,11 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
     await _broadcast({'type': 'screenShare', 'isSharing': isSharing});
   }
 
+  @override
+  Future<void> sendKeyframeRequest(String roomId, String targetPeerId) async {
+    await _broadcast({'type': 'keyframeRequest', 'targetPeerId': targetPeerId});
+  }
+
   Future<void> _broadcast(Map<String, dynamic> data) async {
     data['peerId'] = localPeerId;
     data['roomId'] = _currentRoomId;
@@ -792,6 +797,8 @@ class LiveKitDataChannelSignaling implements SignalingBridge {
         return SignalingMessageType.candidate;
       case 'screenShare':
         return SignalingMessageType.screenShare;
+      case 'keyframeRequest':
+        return SignalingMessageType.keyframeRequest;
       default:
         return SignalingMessageType.error;
     }

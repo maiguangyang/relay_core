@@ -150,6 +150,8 @@ func RelayRoomCreate(roomID *C.char, iceServersJSON *C.char) C.int {
 			utils.Info("Requesting keyframe for new subscriber in room %s", rID)
 			bridge.RequestKeyframe()
 		}
+		// 通知 Dart 层 (P2P Path)
+		emitEvent(13, rID, "", "")
 	})
 
 	registerRelayRoom(goRoomID, room)
