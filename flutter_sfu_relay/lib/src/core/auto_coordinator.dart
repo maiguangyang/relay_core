@@ -1819,6 +1819,22 @@ class AutoCoordinator {
         }
       };
 
+      _monitorConnection!.onIceCandidate = (candidate) {
+        if (candidate.candidate == null || candidate.candidate!.isEmpty) return;
+
+        final monitorId = '$localPeerId-monitor';
+        print('[Monitor] Sending ICE candidate for $monitorId');
+
+        final candidateMap = {
+          'candidate': candidate.candidate,
+          'sdpMid': candidate.sdpMid,
+          'sdpMLineIndex': candidate.sdpMLineIndex,
+        };
+        final candidateJson = jsonEncode(candidateMap);
+
+        _processRelayCandidate(monitorId, candidateJson);
+      };
+
       final offer = await _monitorConnection!.createOffer();
       await _monitorConnection!.setLocalDescription(offer);
 
