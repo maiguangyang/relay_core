@@ -1106,6 +1106,18 @@ class _HomePageState extends State<HomePage> {
               ),
             );
 
+            // Reverse P2P Optimization:
+            // 如果我们不是 Relay，但我们连接到了 Relay (局域网 P2P)，
+            // 我们应该同时把流推给 Relay，让 Relay 帮我们转发给其他人。
+            if (_autoCoord != null &&
+                !_autoCoord!.isRelay &&
+                _autoCoord!.hasP2PConnection) {
+              debugPrint(
+                '[ScreenShare] Reverse P2P: Injecting track to Relay...',
+              );
+              await _autoCoord!.addTrackToRelay(track.mediaStreamTrack);
+            }
+
             // 保存 Track 引用，停止屏幕共享时需要手动释放
             _localScreenShareTrack = track;
 
@@ -1230,7 +1242,20 @@ class _HomePageState extends State<HomePage> {
             (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
           // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
           // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
+          // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
           if (_localScreenShareTrack != null) {
+            // Reverse P2P Optimization: Stop
+            if (_autoCoord != null &&
+                !_autoCoord!.isRelay &&
+                _autoCoord!.hasP2PConnection) {
+              debugPrint(
+                '[ScreenShare] Reverse P2P: Removing track from Relay...',
+              );
+              await _autoCoord!.removeTrackFromRelay(
+                _localScreenShareTrack!.mediaStreamTrack,
+              );
+            }
+
             // 1. 暂存 Track 引用，因为我们要先从 UI 中移除它
             final trackToDispose = _localScreenShareTrack!;
 

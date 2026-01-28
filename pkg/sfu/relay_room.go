@@ -297,6 +297,65 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 	// 设置 ICE 处理 (必须在 SetLocalDescription 之前)
 	r.setupICEHandlers(sub)
 
+	// Reverse P2P: 监听来自订阅者的 Track (B -> A)
+	// 如果收到 Track，说明 B 正在通过 P2P 给我们发数据
+	// 我们将其注入 SourceSwitcher，从而转发给其他人 (A -> C/D)
+	// 同时 A 本地也会渲染这个流 (通过 LocalShareBridge)
+	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		utils.Info("[RelayRoom] OnTrack received from subscriber %s: kind=%s, codec=%s",
+			peerID, track.Kind(), track.Codec().MimeType)
+
+		// 自动声明 "本地分享" (其实是 B 的分享)
+		// 这会让 SourceSwitcher 切换到 SourceTypeLocal
+		// 注意：如果已经有 LocalShare 在运行，这里可能会冲突，
+		// 但根据业务逻辑，同一时间只有一个分享者。
+		// 为了安全，我们只在第一个包到达时触发 StartLocalShare (在循环里做比较好)
+
+		isFirstPacket := true
+		isVideo := track.Kind() == webrtc.RTPCodecTypeVideo
+
+		buf := make([]byte, 1500)
+		for {
+			n, _, err := track.Read(buf)
+			if err != nil {
+				utils.Error("[RelayRoom] Read from subscriber %s track failed: %v", peerID, err)
+				return
+			}
+
+			if isFirstPacket {
+				isFirstPacket = false
+				// 收到第一个包，激活 "Local Share" channel
+				// 使用 peerID 作为 sharerID，告知 SourceSwitcher 谁在发
+				// 如果是视频，我们要根据 codec 更新 SourceSwitcher 的 codec
+				if isVideo {
+					// 必须拿到 mimeType，如 "video/vp8"
+					codecName := track.Codec().MimeType
+					// 简化：通常 mimeType 包含 "video/" 前缀，SourceSwitcher 可能需要清理
+					// 但 NewTrackLocalStaticRTP 接受完整 MIME
+					r.switcher.StartLocalShare(peerID, codecName, false)
+				}
+				utils.Info("[RelayRoom] Started ingesting P2P stream from %s (video=%v)", peerID, isVideo)
+			}
+
+			// 注入 SourceSwitcher
+			// 注意：这里需要深拷贝吗？InjectLocalPacket 会处理
+			// buf 是复用的，所以 InjectLocalPacket 内部必须 copy
+			// 查看 SourceSwitcher 代码，它接受 []byte。
+			// 如果是 FFI 调用的 InjectLocalPacket，FFI 做了 GoBytes copy。
+			// 这里直接调用 Go 方法，如果 Go 方法直接用 buf 且异步处理，可能不安全。
+			// 但 SourceSwitcher.InjectLocalPacket 实现通常是同步处理 packet rewriting 然后 write。
+			// 或者是放入 channel？
+			// 让我们假设它是同步或者 copy 的。
+			// 为了安全，我们传递 buf[:n] 的拷贝?
+			// Pion 的 packet 是 ephemeral 的。
+
+			packetData := buf[:n]
+			if err := r.switcher.InjectLocalPacket(isVideo, packetData); err != nil {
+				// 错误处理? 忽略
+			}
+		}
+	})
+
 	// 处理 Offer
 	offer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,

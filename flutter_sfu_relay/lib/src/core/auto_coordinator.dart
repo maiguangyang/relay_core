@@ -525,6 +525,64 @@ class AutoCoordinator {
     };
   }
 
+  /// P2P 反向注入: 将本地流添加到 Relay 连接
+  ///
+  /// 当本地用户开始屏幕共享时，如果已经与 Relay 建立了 P2P 连接，
+  /// 可以直接将屏幕共享 Track 添加到该连接，Relay 会自动转发给其他人。
+  /// 实现真正的 "Bidirectional" P2P.
+  Future<void> addTrackToRelay(MediaStreamTrack track) async {
+    if (_p2pConnection == null) {
+      // ignore: avoid_print
+      print(
+        '[AutoCoordinator] Warn: addTrackToRelay called but no P2P connection',
+      );
+      return;
+    }
+
+    // ignore: avoid_print
+    print('[AutoCoordinator] Adding track to Relay connection: ${track.id}');
+    await _p2pConnection!.addTrack(track, _p2pRemoteStream!);
+
+    // 触发 renegotiation (发送新的 Offer 给 Relay)
+    await _renegotiate();
+  }
+
+  /// P2P 反向注入: 从 Relay 连接移除流
+  Future<void> removeTrackFromRelay(MediaStreamTrack track) async {
+    if (_p2pConnection == null) return;
+
+    final senders = await _p2pConnection!.getSenders();
+    for (final sender in senders) {
+      if (sender.track?.id == track.id) {
+        // ignore: avoid_print
+        print(
+          '[AutoCoordinator] Removing track from Relay connection: ${track.id}',
+        );
+        await _p2pConnection!.removeTrack(sender);
+        break;
+      }
+    }
+    await _renegotiate();
+  }
+
+  Future<void> _renegotiate() async {
+    if (_p2pConnection == null || _currentRelay == null) return;
+
+    try {
+      final offer = await _p2pConnection!.createOffer();
+      await _p2pConnection!.setLocalDescription(offer);
+
+      signaling.sendOffer(roomId, _currentRelay!, offer.sdp!);
+      // ignore: avoid_print
+      print(
+        '[AutoCoordinator] Renegotiation: Sent offer to Relay $_currentRelay',
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AutoCoordinator] Renegotiation failed: $e');
+    }
+  }
+
   // ========== 内部方法 ==========
 
   void _updateState(AutoCoordinatorState newState) {
