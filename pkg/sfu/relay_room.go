@@ -250,7 +250,8 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 			return "", err
 		}
 		// 注册我们的拦截器
-		registry.Add(&CongestionInterceptorFactory{Interceptor: congestionCP})
+		// registry.Add(&CongestionInterceptorFactory{Interceptor: congestionCP})
+		utils.Info(" Congestion Control DISABLED")
 
 		// 创建专用的 API
 		api := webrtc.NewAPI(webrtc.WithMediaEngine(r.mediaEngine), webrtc.WithInterceptorRegistry(registry))

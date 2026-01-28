@@ -576,9 +576,12 @@ class AutoCoordinator {
       final params = sender.parameters;
       if (params.encodings != null && params.encodings!.isNotEmpty) {
         params.encodings!.first.maxBitrate = 8000 * 1000; // 8 Mbps
-        // params.encodings!.first.maxFramerate = 30; // 30 FPS (Let capture decide)
+        params.degradationPreference =
+            RTCDegradationPreference.MAINTAIN_RESOLUTION;
         await sender.setParameters(params); // Wait for this to complete
-        print('[AutoCoordinator] Set P2P sender parameters: 8Mbps');
+        print(
+          '[AutoCoordinator] Set P2P sender parameters: 8Mbps, MaintainResolution',
+        );
       }
     } catch (e) {
       print('[AutoCoordinator] Failed to set sender parameters: $e');
