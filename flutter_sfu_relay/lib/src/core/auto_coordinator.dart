@@ -184,6 +184,7 @@ class AutoCoordinator {
   // P2P 订阅者连接（当本机不是 Relay 且在局域网时使用）
   RTCPeerConnection? _p2pConnection;
   MediaStream? _p2pRemoteStream;
+  MediaStream? _p2pLocalStream; // 用于 P2P 上行的本地流容器
   bool _p2pConnected = false;
 
   // 屏幕共享状态
@@ -389,6 +390,8 @@ class AutoCoordinator {
 
     // 断开 P2P 订阅者连接
     await _closeP2PConnection();
+    await _p2pLocalStream?.dispose();
+    _p2pLocalStream = null;
 
     _peers.clear();
     _currentRelay = null;
@@ -541,7 +544,16 @@ class AutoCoordinator {
 
     // ignore: avoid_print
     print('[AutoCoordinator] Adding track to Relay connection: ${track.id}');
-    await _p2pConnection!.addTrack(track, _p2pRemoteStream!);
+
+    // 关键修复: 不要使用 _p2pRemoteStream (recv-only) 作为本地 Track 的容器
+    // 这会导致 "stream [relay-stream] not found" 错误，因为 Native 层可能试图操作远程流
+    // 我们应该创建一个专门的本地流用于上行
+    if (_p2pLocalStream == null) {
+      _p2pLocalStream = await createLocalMediaStream('p2p-upstream');
+    }
+    _p2pLocalStream!.addTrack(track);
+
+    await _p2pConnection!.addTrack(track, _p2pLocalStream!);
 
     // 触发 renegotiation (发送新的 Offer 给 Relay)
     await _renegotiate();

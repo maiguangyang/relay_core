@@ -1046,10 +1046,10 @@ class _HomePageState extends State<HomePage> {
           // 基础带宽限制 (根据网络类型)
           int baseBitrate;
           if (_lastConnectionType == ConnectionType.ethernet) {
-            baseBitrate = 4000 * 1000; // Ethernet: 给足带宽
+            baseBitrate = 8000 * 1000; // Ethernet: 8Mbps (高清)
             selectedCodec = 'vp9'; // VP9 压缩效率高
           } else if (_lastConnectionType == ConnectionType.wifi) {
-            baseBitrate = 3000 * 1000; // WiFi: 3Mbps
+            baseBitrate = 4000 * 1000; // WiFi: 4Mbps
             selectedCodec = 'vp9';
           } else {
             baseBitrate = 1500 * 1000; // 蜂窝网络: 1.5Mbps
@@ -1240,8 +1240,6 @@ class _HomePageState extends State<HomePage> {
       } else {
         if (!kIsWeb &&
             (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
-          // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
-          // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
           // Desktop: 手动发布的 Track 需要手动 Unpublish 和销毁
           if (_localScreenShareTrack != null) {
             // Reverse P2P Optimization: Stop
