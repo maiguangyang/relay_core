@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/maiguangyang/relay_core/pkg/utils"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -56,6 +57,9 @@ type Subscriber struct {
 	videoSender *webrtc.RTPSender
 	audioSender *webrtc.RTPSender
 
+	// 拥塞控制拦截器
+	congestionCP *CongestionInterceptor
+
 	// 统计
 	bytesSent    uint64
 	packetsSent  uint64
@@ -68,8 +72,12 @@ type Subscriber struct {
 type RelayRoom struct {
 	mu sync.RWMutex
 
-	id     string
-	api    *webrtc.API
+	id  string
+	api *webrtc.API // 外部传入的 API (可选)
+
+	// 内部使用的引擎 (当 api 为 nil 时使用)
+	mediaEngine *webrtc.MediaEngine
+
 	config webrtc.Configuration
 
 	// 源切换器
@@ -143,13 +151,14 @@ func NewRelayRoom(id string, iceServers []webrtc.ICEServer, opts ...RelayRoomOpt
 		room.UpdateTracks(videoTrack, audioTrack)
 	})
 
-	// 如果没有设置 API，使用默认的
+	// 如果没有设置 API，初始化默认的 MediaEngine，以便后续为每个订阅者创建 API
 	if room.api == nil {
 		m := &webrtc.MediaEngine{}
 		if err := m.RegisterDefaultCodecs(); err != nil {
 			return nil, err
 		}
-		room.api = webrtc.NewAPI(webrtc.WithMediaEngine(m))
+		room.mediaEngine = m
+		// 注意：我们不再创建全局 api，而是为了拥塞控制在 AddSubscriber 时动态创建
 	}
 
 	return room, nil
@@ -223,7 +232,31 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 	r.mu.Unlock()
 
 	// 创建 PeerConnection
-	pc, err := r.api.NewPeerConnection(r.config)
+	var pc *webrtc.PeerConnection
+	var err error
+	var congestionCP *CongestionInterceptor
+
+	if r.api != nil {
+		// 使用外部 API (无自定义拥塞控制)
+		pc, err = r.api.NewPeerConnection(r.config)
+	} else {
+		// 使用内部 MediaEngine 并注入拥塞控制拦截器
+		congestionCP = NewCongestionInterceptor()
+
+		// 创建拦截器注册表
+		registry := &interceptor.Registry{}
+		if err := webrtc.RegisterDefaultInterceptors(r.mediaEngine, registry); err != nil {
+			r.mu.Unlock()
+			return "", err
+		}
+		// 注册我们的拦截器
+		registry.Add(&CongestionInterceptorFactory{Interceptor: congestionCP})
+
+		// 创建专用的 API
+		api := webrtc.NewAPI(webrtc.WithMediaEngine(r.mediaEngine), webrtc.WithInterceptorRegistry(registry))
+		pc, err = api.NewPeerConnection(r.config)
+	}
+
 	if err != nil {
 		return "", err
 	}
@@ -231,6 +264,7 @@ func (r *RelayRoom) AddSubscriber(peerID string, offerSDP string) (string, error
 	sub := &Subscriber{
 		id:           peerID,
 		pc:           pc,
+		congestionCP: congestionCP,
 		state:        SubscriberStateConnecting,
 		lastActivity: time.Now(),
 	}
@@ -772,6 +806,20 @@ func (r *RelayRoom) readRTCP(peerID string, sender *webrtc.RTPSender) {
 				} else {
 					r.mu.Unlock()
 					// 跳过此 PLI，太频繁
+				}
+			} else if pt == 201 && n >= 8 {
+				// 尝试解析 Receiver Report (RR) 来更新 RTT
+				// RR Payload Type = 201
+				// 获取 sub 对象更新统计
+				r.mu.RLock()
+				sub, exists := r.subscribers[peerID]
+				r.mu.RUnlock()
+
+				if exists && sub.congestionCP != nil {
+					// 简单解析 RTT (需要 NTP 时间戳支持，这里做近似估算或解析 DLSR)
+					// FIXME: 真正实现需要 parse RTCP packet.
+					// 这里是一个占位符，演示拥塞控制的集成点。
+					// sub.congestionCP.UpdateStats(...)
 				}
 			}
 		}

@@ -21,6 +21,12 @@ import '../widgets/screen_share_dialog.dart';
 // LocalShareBridge 现在通过公开导出提供
 // import 'package:flutter_sfu_relay/flutter_sfu_relay.dart' 已包含
 
+/// 屏幕共享模式
+enum ScreenShareMode {
+  text, // 静态文本模式：低帧率(5-8fps)，高清晰度，适合PPT/文档
+  motion, // 动态视频模式：高帧率(30fps)，流畅度优先，适合视频
+}
+
 /// 首页 - 独立完整的会议页面
 /// 包含连接表单、LiveKit集成、屏幕共享、语音会议功能
 class HomePage extends StatefulWidget {
@@ -81,6 +87,7 @@ class _HomePageState extends State<HomePage> {
   lk.Participant? _screenShareParticipant;
   bool _isScreenShareMaximized = true; // 默认最大化显示
   bool _isScreenShareFullscreen = false; // 全屏模式
+  ScreenShareMode _screenShareMode = ScreenShareMode.text; // 默认文本模式
 
   // 控制状态
   ControlState _controlState = const ControlState();
@@ -1000,6 +1007,13 @@ class _HomePageState extends State<HomePage> {
 
     try {
       if (newState) {
+        // 先让用户选择屏幕共享模式 (优化清晰度/流畅度)
+        final mode = await _showScreenShareModeDialog();
+        if (mode == null) return; // 用户取消
+        setState(() {
+          _screenShareMode = mode;
+        });
+
         // 检查是否已有人在分享屏幕
         if (_screenShareParticipant != null &&
             _screenShareParticipant!.identity != _localParticipant?.identity) {
@@ -1025,37 +1039,34 @@ class _HomePageState extends State<HomePage> {
 
           if (result == null) return;
 
-          // 根据网络类型动态调整码率和帧率
-          // Ethernet: 3.0 Mbps / 30fps (高质量办公模式)
-          // WiFi: 3.0 Mbps / 15fps (标准办公模式，接近腾讯会议)
-          // Others: 1.0 Mbps / 15fps (省流模式)
+          // 根据网络类型和共享模式动态调整码率和帧率
           int maxBitrate;
           int maxFramerate;
 
+          // 基础带宽限制 (根据网络类型)
+          int baseBitrate;
           if (_lastConnectionType == ConnectionType.ethernet) {
-            maxBitrate = 3000 * 1000; // 3.0 Mbps
-            maxFramerate = 30;
-            // Ethernet 使用 VP9 以获得最佳画质，硬件支持通常较好
-            selectedCodec = 'vp9';
-            debugPrint(
-              '[ScreenShare] Network: Ethernet -> Using High Quality Office Mode (3Mbps/30fps/VP9)',
-            );
+            baseBitrate = 4000 * 1000; // Ethernet: 给足带宽
+            selectedCodec = 'vp9'; // VP9 压缩效率高
           } else if (_lastConnectionType == ConnectionType.wifi) {
-            maxBitrate = 3000 * 1000; // 3.0 Mbps (提升码率以解决深色背景色彩断层)
-            maxFramerate = 15;
-            // WiFi 使用 VP9 以获得更高压缩率和更好画质（解决色带问题）
+            baseBitrate = 3000 * 1000; // WiFi: 3Mbps
             selectedCodec = 'vp9';
-            debugPrint(
-              '[ScreenShare] Network: WiFi -> Using High Fidelity Office Mode (3.0Mbps/15fps/VP9)',
-            );
           } else {
-            maxBitrate = 1000 * 1000; // 1.0 Mbps
-            maxFramerate = 15;
-            // 蜂窝网络使用 H.264 以获得更好的兼容性和更低的编解码开销（省电）
-            selectedCodec = 'h264';
-            debugPrint(
-              '[ScreenShare] Network: ${_lastConnectionType?.name} -> Using Data Saver Mode (1Mbps/15fps/H264)',
-            );
+            baseBitrate = 1500 * 1000; // 蜂窝网络: 1.5Mbps
+            selectedCodec = 'h264'; // H264 省电
+          }
+
+          // 根据模式调整参数
+          if (_screenShareMode == ScreenShareMode.text) {
+            // 文字模式：FPS 限制在 5-8，利用全部带宽传输高质量 I 帧
+            maxFramerate = 8;
+            maxBitrate = baseBitrate;
+            debugPrint('[ScreenShare] Mode: TEXT -> 8fps, High Fidelity');
+          } else {
+            // 视频模式：FPS 30，保证流畅
+            maxFramerate = 30;
+            maxBitrate = baseBitrate;
+            debugPrint('[ScreenShare] Mode: MOTION -> 30fps, Fluid Motion');
           }
 
           // 使用动态参数创建 Track
@@ -1149,9 +1160,21 @@ class _HomePageState extends State<HomePage> {
           final screenShareFuture = _localParticipant!
               .setScreenShareEnabled(
                 true,
-                screenShareCaptureOptions: const lk.ScreenShareCaptureOptions(
+                screenShareCaptureOptions: lk.ScreenShareCaptureOptions(
                   useiOSBroadcastExtension: true,
-                  maxFrameRate: 60.0,
+                  // iOS 广播扩展参数：根据模式调整
+                  maxFrameRate: _screenShareMode == ScreenShareMode.text
+                      ? 10.0
+                      : 30.0,
+                  params: lk.VideoParameters(
+                    dimensions: const lk.VideoDimensions(1920, 1080),
+                    encoding: lk.VideoEncoding(
+                      maxBitrate: 3000 * 1000,
+                      maxFramerate: _screenShareMode == ScreenShareMode.text
+                          ? 10
+                          : 30,
+                    ),
+                  ),
                 ),
               )
               .then((_) {
@@ -1182,7 +1205,25 @@ class _HomePageState extends State<HomePage> {
           debugPrint('[ScreenShare] Screen share flow finished');
         } else {
           // Android 和其他平台
-          await _localParticipant!.setScreenShareEnabled(true);
+          // Android 和其他平台
+          await _localParticipant!.setScreenShareEnabled(
+            true,
+            screenShareCaptureOptions: lk.ScreenShareCaptureOptions(
+              captureScreenAudio: true,
+              maxFrameRate: _screenShareMode == ScreenShareMode.text
+                  ? 8.0
+                  : 30.0,
+              params: lk.VideoParameters(
+                dimensions: const lk.VideoDimensions(1920, 1080),
+                encoding: lk.VideoEncoding(
+                  maxBitrate: 2000 * 1000, // Android 默认 2Mbps?
+                  maxFramerate: _screenShareMode == ScreenShareMode.text
+                      ? 8
+                      : 30,
+                ),
+              ),
+            ),
+          );
         }
       } else {
         if (!kIsWeb &&
@@ -2397,18 +2438,100 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSmallTag(String text, Color color) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
         color: color.withOpacity(0.2),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color, width: 1),
+        border: Border.all(color: color, width: 0.5),
       ),
       child: Text(
         text,
         style: TextStyle(
           color: color,
-          fontSize: 9,
+          fontSize: 8,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  // -------------------- 辅助方法 --------------------
+
+  /// 显示屏幕共享模式选择对话框
+  Future<ScreenShareMode?> _showScreenShareModeDialog() async {
+    return await showDialog<ScreenShareMode>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.surfaceDark,
+          title: const Text('选择屏幕共享模式', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildModeOption(
+                icon: Icons.article,
+                title: '清晰度优先 (文本模式)',
+                subtitle: '适合 PPT、文档、代码。低帧率(8fps)，画质极高。',
+                mode: ScreenShareMode.text,
+              ),
+              const SizedBox(height: 12),
+              _buildModeOption(
+                icon: Icons.movie,
+                title: '流畅度优先 (视频模式)',
+                subtitle: '适合播放视频、快速滚动。高帧率(30fps)，画质均衡。',
+                mode: ScreenShareMode.motion,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildModeOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required ScreenShareMode mode,
+  }) {
+    return InkWell(
+      onTap: () => Navigator.pop(context, mode),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppTheme.cardDark, width: 1),
+          borderRadius: BorderRadius.circular(12),
+          color: Colors.white.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 32, color: AppTheme.primaryColor),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
