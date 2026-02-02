@@ -49,7 +49,8 @@ class _HomePageState extends State<HomePage> {
   final _urlController = TextEditingController(
     // text: 'wss://frp.marlon.proton-system.com',
     // text: 'wss://oxygen-sl1zv95n.livekit.cloud',
-    text: 'wss://live.kuonang.com',
+    // text: 'wss://live.kuonang.com',
+    text: 'ws://192.167.167.129:7880',
   );
   final _tokenController = TextEditingController();
   // 影子连接专用：Bot Token (identity: "relay-bot", hidden: true, canSubscribe: true)
@@ -57,7 +58,7 @@ class _HomePageState extends State<HomePage> {
     // 测试用写死的 Bot Token
     text:
         // 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTgyNjQ4MDQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiQVBJQnNza2pZczZqU2t5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2NjcyODgwNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Rfcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.UJQj70gBARSlOuRU9EdVacm-03oC91DwKqpM6BDUFB8',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzAzMzkwMzAsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoibWFybG9uIiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc2OTQ3NTAzMCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6Im9mZmljZS10ZXN0LTk5OCIsInJvb21Kb2luIjp0cnVlfX0.UO6nwgWbK56L2RiRlXnbf8IlTQO1CzNSh5UusAVaZPk',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzA4NzgxMTQsImlkZW50aXR5IjoicmVsYXktYm90IiwiaXNzIjoiZGV2a2V5IiwibmFtZSI6InJlbGF5LWJvdCIsIm5iZiI6MTc3MDAxNDExNCwic3ViIjoicmVsYXktYm90IiwidmlkZW8iOnsicm9vbSI6InRlc3Qtcm9vbSIsInJvb21Kb2luIjp0cnVlfX0.1ElBtC6ByU8ypLj1xL1Vc_Gzt3zR7gYH9PNond2p3U0',
   );
 
   // 页面状态
@@ -1076,10 +1077,10 @@ class _HomePageState extends State<HomePage> {
     try {
       if (newState) {
         // 先让用户选择屏幕共享模式 (优化清晰度/流畅度)
-        final mode = await _showScreenShareModeDialog();
-        if (mode == null) return; // 用户取消
+        // final mode = await _showScreenShareModeDialog(); // Fixed to Text mode
+        // if (mode == null) return; // 用户取消
         setState(() {
-          _screenShareMode = mode;
+          _screenShareMode = ScreenShareMode.text;
         });
 
         // 检查是否已有人在分享屏幕
@@ -1125,16 +1126,14 @@ class _HomePageState extends State<HomePage> {
           }
 
           // 根据模式调整参数
-          if (_screenShareMode == ScreenShareMode.text) {
-            // 文字模式：FPS 限制在 5-8，利用全部带宽传输高质量 I 帧
+          // 强制使用文本模式 (UI要求固定为文本模式)
+          if (true) {
+            // 文字模式：FPS 限制在 8，利用全部带宽传输高质量 I 帧
             maxFramerate = 8;
             maxBitrate = baseBitrate;
-            debugPrint('[ScreenShare] Mode: TEXT -> 8fps, High Fidelity');
-          } else {
-            // 视频模式：FPS 30，保证流畅
-            maxFramerate = 30;
-            maxBitrate = baseBitrate;
-            debugPrint('[ScreenShare] Mode: MOTION -> 30fps, Fluid Motion');
+            debugPrint(
+              '[ScreenShare] Mode: FORCED TEXT -> 8fps, High Fidelity',
+            );
           }
 
           // 使用动态参数创建 Track

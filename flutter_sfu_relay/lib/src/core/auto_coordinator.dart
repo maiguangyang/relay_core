@@ -405,7 +405,11 @@ class AutoCoordinator {
 
     // 断开 P2P 订阅者连接
     await _closeP2PConnection();
-    await _p2pLocalStream?.dispose();
+    try {
+      await _p2pLocalStream?.dispose();
+    } catch (e) {
+      print('[AutoCoordinator] Ignored error disposing p2pLocalStream: $e');
+    }
     _p2pLocalStream = null;
 
     // 断开 Monitor 连接
@@ -947,6 +951,13 @@ class AutoCoordinator {
     // 如果是 Relay 离开，触发重新选举
     if (peerId == _currentRelay) {
       _currentRelay = null;
+      triggerElection();
+    } else if (_peers.isEmpty && _currentRelay == null) {
+      // 房间里只剩我们自己，且当前没有 Relay，触发选举成为 Relay
+      // 这可以防止房间进入僵死状态 (用户在但没 Relay)
+      print(
+        '[AutoCoordinator] Last peer left, starting election to become Relay',
+      );
       triggerElection();
     }
   }
